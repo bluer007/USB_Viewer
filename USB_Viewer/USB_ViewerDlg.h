@@ -21,7 +21,7 @@ public:
 	// 获取当前所有U盘设备, 并显示到ID控件上
 	INT GetUSB(CDialogEx* dialog, INT ID);
 	//获得给定U盘中的基本分区信息
-	INT GetUSBInfo(Partition_Table(*list)[4], UCHAR sector[] = NULL, INT sectorSize = 0, HANDLE hDevice = NULL, LPCSTR drive = NULL, LPCSTR disk = NULL);
+	INT GetUSBInfo(Partition_Table(*list)[4], /*UCHAR sector[] = NULL, INT sectorSize = 0,*/ HANDLE *hDevice = NULL, LPCSTR drive = NULL, LPCSTR disk = NULL);
 
 	
 // 对话框数据
@@ -50,4 +50,7 @@ protected:
 	DECLARE_MESSAGE_MAP()
 
 
+public:
+	afx_msg void OnAbout();
+afx_msg void OnBnClickedCancel();
 };

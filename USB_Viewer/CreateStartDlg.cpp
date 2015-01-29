@@ -352,7 +352,7 @@ ERROR2:
 	::FlushFileBuffers(m_hDrv);
 	//if (!this->m_FormatPartitionArg->hDrv)	给主线程代为CloseHandle(m_hDrv);
 		CloseHandle(m_hDrv);
-ERROR1:
+//ERROR1:
 	//this->DismountVolume();
 	//this->UnLockVolume();
 	if (this->m_FormatPartitionArg->msgWnd)
@@ -479,6 +479,35 @@ INT CCreateStartDlg::RestorePartitionBootSector(HANDLE *hDevice, INT num, DISK_G
 	return TRUE;
 }
 
+INT CCreateStartDlg::GetPartitionBootSector(UCHAR sector[], HANDLE *hDevice, INT partitionNum, DISK_GEOMETRY* diskGeometry)
+{
+	//partitionNum表示要获取的引导扇区是分区表第partitionNum个分区的, 设为 1,2, 3, 4
+	if (partitionNum > 4 || partitionNum <= 0 || !hDevice || !diskGeometry || !sector)
+		return FALSE;
+
+	INT sector_size = 0;
+	if (!(sector_size = this->GetDiskSector(sector, hDevice, NULL, NULL, diskGeometry)))
+		return FALSE;
+	
+	DWORD sys_start_pos = 0;
+	memcpy_s(&sys_start_pos, 4, &sector[sector_size - 66 + 8 + (partitionNum - 1) * 16], 4);		//分区前预留扇区, 即分区开始扇区
+	if (sys_start_pos <= 0)		//对分区前预留扇区标志位做有效性检测
+		return FALSE;
+
+	LARGE_INTEGER offset;
+	DWORD dwBytes = 0;
+	offset.QuadPart = sys_start_pos * diskGeometry->BytesPerSector;		// 有符号的64位整型表示 
+	SetFilePointer(*hDevice, offset.LowPart, &offset.HighPart, FILE_BEGIN);
+	ReadFile(*hDevice, sector, diskGeometry->BytesPerSector, &dwBytes, NULL);		//读取活动分区第一个引导扇区
+	if (dwBytes == diskGeometry->BytesPerSector)
+	{
+		return dwBytes;		//return TRUE;
+	}
+	else
+		return FALSE;
+}
+
+
 INT CCreateStartDlg::GetDiskSector(UCHAR sector[], HANDLE *hDevice, LPCSTR drive, LPCSTR disk, DISK_GEOMETRY* diskGeometry)
 {
 	if (!sector || !diskGeometry)
@@ -511,6 +540,117 @@ INT CCreateStartDlg::GetDiskSector(UCHAR sector[], HANDLE *hDevice, LPCSTR drive
 	else
 		return FALSE;
 
+}
+
+INT CCreateStartDlg::GetOnePartitionInfo(Partition_Table *list, HANDLE *hDevice, INT partitionNum, DISK_GEOMETRY* diskGeometry)
+{
+	//partitionNum为第几个分区, 如1, 2,3 4
+	if (!list || !hDevice || partitionNum > 4 || partitionNum <= 0 || !diskGeometry)
+		return FALSE;
+
+	UCHAR* sector = new UCHAR[diskGeometry->BytesPerSector]();
+	if (!this->GetPartitionBootSector(sector, hDevice, partitionNum, diskGeometry))
+		return FALSE;
+	
+	enum TYPE
+	{
+		NTFS,
+		FAT32,
+		UNKNOW
+	};
+	TYPE type = UNKNOW;
+	CHAR name[6] = { 0 };
+	memcpy_s(name, sizeof(name), &sector[3], 4);		//sector[3,4,5,6]是NTFS的File system ID ("NTFS")
+	
+	//判断分区的文件系统
+	if (strcmp(name, "NTFS") == 0)
+	{
+		type = NTFS;
+	}
+	else
+	{
+		ZeroMemory(name, sizeof(name));
+		memcpy_s(name, sizeof(name), &sector[82], 5);		//sector[82,83,84,85,86]是FAT32的File system标志位("FAT32")
+		if (strcmp(name, "FAT32") == 0)
+			type = FAT32;
+		else
+			return FALSE;		//type = UNKNOW;
+	}
+
+	//设置分区的  文件系统type 和 大小size 参数
+	DWORD partitionSize = 0;
+	if (NTFS == type)
+	{
+		memcpy_s(&partitionSize, sizeof(DWORD), &sector[40], 4);		//ntfs引导扇区中 分区总共扇区 标志位
+		if (partitionSize <= 0)
+			return FALSE;
+		else
+			partitionSize++;		//因为ntfs的 分区总共扇区 是算少了第一个引导扇区的 , 而fat32中是没有算少的
+
+		strcpy_s(list->type, sizeof(list->type), TEXT("ntfs"));
+		list->size = LONG(partitionSize * diskGeometry->BytesPerSector / 1024.0 / 1024.0);
+	}
+	else if (FAT32 == type)
+	{
+		memcpy_s(&partitionSize, sizeof(DWORD), &sector[32], 4);		//fat32引导扇区中 分区总共扇区 标志位	Sectors (on large volumes)
+		if (partitionSize <= 0)
+			return FALSE;
+
+		strcpy_s(list->type, sizeof(list->type), TEXT("fat32"));
+		list->size = LONG(partitionSize * diskGeometry->BytesPerSector / 1024.0 / 1024.0);
+	}
+	else
+		return FALSE;
+
+	return TRUE;
+}
+
+INT CCreateStartDlg::GetActivePartitionNum(HANDLE *hDevice, LPCSTR drive, LPCSTR disk)
+{
+	HANDLE m_hDevice = INVALID_HANDLE_VALUE;
+	UCHAR* sector = NULL;
+	INT res = FALSE;
+	if (hDevice && *hDevice != INVALID_HANDLE_VALUE)
+	{
+		m_hDevice = *hDevice;
+	}
+	else if (!this->GetDiskHandle(drive, disk, &m_hDevice))
+	{
+		return FALSE;
+	}
+		
+	DISK_GEOMETRY diskGeometry = {0};
+	if (!this->GetDiskGeometry(&m_hDevice, NULL, NULL, &diskGeometry))
+		goto FINAL;
+
+	sector = new UCHAR[diskGeometry.BytesPerSector]();
+	INT sector_size = 0;
+	if (!(sector_size = this->GetDiskSector(sector, &m_hDevice, NULL, NULL, &diskGeometry)))
+		goto FINAL;
+
+	INT m_ActivePartitionNum = 0;
+	//寻找活动分区, 根据活动分区标志位
+	for (m_ActivePartitionNum = 1; 
+			m_ActivePartitionNum <= 4 
+			&& sector[sector_size - 66 + (m_ActivePartitionNum - 1) * 16] != 0x80; 
+			m_ActivePartitionNum++) {};
+	if (m_ActivePartitionNum > 4)
+	{
+		res = NO_Active_Partition;
+		goto FINAL;		//找不到活动分区
+	}
+	else
+	{
+		res = m_ActivePartitionNum;
+		goto FINAL;		//找不到活动分区
+	}
+
+FINAL:
+	if (sector)
+		delete[] sector;
+	if (!hDevice)
+		CloseHandle(m_hDevice);
+	return res;
 }
 
 INT CCreateStartDlg::ChangePartitionTable(HANDLE *hDisk, LPCSTR drive, LPCSTR disk, LPCSTR order/* = NULL*/)
@@ -696,9 +836,9 @@ INT CCreateStartDlg::CreatePartitionTable(UCHAR sector[], INT sector_size, INT n
 		}
 		else
 		{
-			sys_end_pos[2] = (temp_pre + temp_size - 1) / (diskGeometry->TracksPerCylinder * diskGeometry->SectorsPerTrack);	//分区结束柱面 (注意由于是一个字节做存储大小,所以肯定不会大于255, 即391会赋值成为135)
-			sys_end_pos[1] = (temp_pre + temp_size - 1) % (diskGeometry->TracksPerCylinder * diskGeometry->SectorsPerTrack) % diskGeometry->SectorsPerTrack + 1;	//分区结束扇区
-			sys_end_pos[0] = (temp_pre + temp_size - 1) % (diskGeometry->TracksPerCylinder * diskGeometry->SectorsPerTrack) / diskGeometry->SectorsPerTrack;	//分区结束磁头
+			sys_end_pos[2] = unsigned char((temp_pre + temp_size - 1) / (diskGeometry->TracksPerCylinder * diskGeometry->SectorsPerTrack));	//分区结束柱面 (注意由于是一个字节做存储大小,所以肯定不会大于255, 即391会赋值成为135)
+			sys_end_pos[1] = unsigned char((temp_pre + temp_size - 1) % (diskGeometry->TracksPerCylinder * diskGeometry->SectorsPerTrack) % diskGeometry->SectorsPerTrack + 1);	//分区结束扇区
+			sys_end_pos[0] = unsigned char((temp_pre + temp_size - 1) % (diskGeometry->TracksPerCylinder * diskGeometry->SectorsPerTrack) / diskGeometry->SectorsPerTrack);	//分区结束磁头
 		}
 
 		unsigned char table[16] = 				//分区表中的单条项目
@@ -1098,66 +1238,30 @@ INT CCreateStartDlg::InstallPBR(HANDLE *hDevice, LPCSTR drive, LPCSTR disk, DISK
 		m_diskGeometry = *diskGeometry;
 	}
 
+	//U盘扇区大小有效性检测, 暂只支持512字节大小扇区的U盘
 	if (m_diskGeometry.BytesPerSector != (sizeof(pbr_fat32_data) / sizeof(pbr_fat32_data[0])))
 		goto ERROR1;
 
-	INT sector_size = 0;
-	sector = new unsigned char[m_diskGeometry.BytesPerSector]{ 0 };
-	if (!(sector_size = this->GetDiskSector(sector, &m_hDevice, NULL, NULL, &m_diskGeometry)))
+	//获得活动分区是第m_ActivePartitionNum分区
+	INT m_ActivePartitionNum = this->GetActivePartitionNum(&m_hDevice, NULL, NULL);
+	if (!m_ActivePartitionNum || NO_Active_Partition == m_ActivePartitionNum)
 		goto ERROR1;
 
-	enum TYPE
-	{
-		NTFS,
-		FAT32,
-		UNKNOW
-	};
-	TYPE type = UNKNOW;
-	int partitionNum;
-	//寻找活动分区, 根据活动分区标志位
-	for (partitionNum = 0; partitionNum < 4 && sector[sector_size - 66 + partitionNum * 16] != 0x80; partitionNum++){};
-	if (partitionNum >= 4)	
-		return FALSE;
-	INT sys_start_pos = 0;
-	memcpy_s(&sys_start_pos, 4, &sector[sector_size - 66 + 8 + partitionNum * 16], 4);		//分区前预留扇区, 即分区开始扇区
-	
-	LARGE_INTEGER offset;
-	DWORD dwBytes = 0;
-	offset.QuadPart = sys_start_pos * m_diskGeometry.BytesPerSector;		// 有符号的64位整型表示 
-	SetFilePointer(m_hDevice, offset.LowPart, &offset.HighPart, FILE_BEGIN);
-	ReadFile(m_hDevice, sector, m_diskGeometry.BytesPerSector, &dwBytes, NULL);		//读取活动分区第一个引导扇区
-	if (dwBytes == m_diskGeometry.BytesPerSector)
-	{
-		CHAR name[6] = {0};
-		memcpy_s(name, sizeof(name), &sector[3], 4);		//sector[3,4,5,6]是NTFS的File system ID ("NTFS")
-		//判断活动分区的文件系统格式
-		if (strcmp(name, "NTFS") == 0)
-		{
-			type = NTFS;
-		}
-		else
-		{
-			ZeroMemory(name, sizeof(name));
-			memcpy_s(name, sizeof(name), &sector[82], 5);		//sector[82,83,84,85,86]是FAT32的File system标志位("FAT32")
-			if (strcmp(name, "FAT32") == 0)
-				type = FAT32;
-			else
-				goto ERROR1;		//type = UNKNOW;
-		}
-	}
-	else
+	//获得活动分区的type类型, size信息
+	Partition_Table list;		// = { 0 };
+	if (!this->GetOnePartitionInfo(&list, NULL, m_ActivePartitionNum, &m_diskGeometry))
 		goto ERROR1;
 	
 	DWORD pbr_data_size = 0;
 	unsigned char* pbr_data = NULL;
-	if (NTFS == type)
+	if (strcmp(list.type, TEXT("ntfs")) == 0)
 	{
 		//将活动分区(ntfs)的引导扇区特有部分(前84个字节)复制到pbr_ntfs_data对应位置上
 		memcpy_s(&pbr_ntfs_data[0], 84, &sector[0], 84);
 		pbr_data = pbr_ntfs_data;
 		pbr_data_size = sizeof(pbr_ntfs_data);
 	}
-	else if (FAT32 == type)
+	else if (strcmp(list.type, TEXT("fat32")) == 0)
 	{
 		//将活动分区(fat32)的引导扇区特有部分(前90个字节)复制到pbr_fat32_data对应位置上
 		memcpy_s(&pbr_fat32_data[0], 90, &sector[0], 90);
@@ -1166,11 +1270,24 @@ INT CCreateStartDlg::InstallPBR(HANDLE *hDevice, LPCSTR drive, LPCSTR disk, DISK
 	}
 	else
 		goto ERROR1;
-	//写入活动分区的引导扇区
-	DWORD AA = SetFilePointer(m_hDevice, offset.LowPart, &offset.HighPart, FILE_BEGIN);
-	 BOOL res = WriteFile(m_hDevice, pbr_data, pbr_data_size, &dwBytes, NULL);
-	 DWORD RES2 = GetLastError();
 
+	INT sector_size = 0;
+	sector = new unsigned char[m_diskGeometry.BytesPerSector]();
+	if (!(sector_size = this->GetDiskSector(sector, &m_hDevice, NULL, NULL, &m_diskGeometry)))
+		goto ERROR1;
+
+	LARGE_INTEGER offset;
+	DWORD dwBytes = 0;
+	INT sys_start_pos = 0;
+	//获取活动分区开始位置
+	memcpy_s(&sys_start_pos, sizeof(sys_start_pos), &sector[sector_size - 66 + 8 + (m_ActivePartitionNum - 1) * 16], 4);
+	if (sys_start_pos <= 0)
+		goto ERROR1;
+	offset.QuadPart = sys_start_pos * m_diskGeometry.BytesPerSector;
+	
+	//写入活动分区的引导扇区
+	SetFilePointer(m_hDevice, offset.LowPart, &offset.HighPart, FILE_BEGIN);
+	WriteFile(m_hDevice, pbr_data, pbr_data_size, &dwBytes, NULL);
 	if (dwBytes == pbr_data_size)
 	{
 		if (!hDevice)
@@ -1437,7 +1554,7 @@ INT CCreateStartDlg::Free7z(LPCSTR path /*= NULL*/, BOOL isDelete /*= FALSE*/)
 		return FALSE;
 }
 
-INT CCreateStartDlg::RemountDrive(INT remountNum /*= 2*/, BOOL isRestore /*= FALSE*/)
+INT CCreateStartDlg::RemountDrive(INT remountNum /*= 2*/, BOOL isRestore /*= FALSE*/, LPCSTR desPath /*= NULL*/)
 {
 	//本函数使系统挂载U盘中第remountNum个分区(1, 2, 3, 4)
 	//isRestore表示是否将U盘的分区挂载情况复原
@@ -1461,11 +1578,27 @@ INT CCreateStartDlg::RemountDrive(INT remountNum /*= 2*/, BOOL isRestore /*= FAL
 		return FALSE;
 	}
 	
-	if (!this->ChangePartitionTable(NULL, this->m_UnZipArg->desPath, NULL, order))
+	CHAR m_desPath[MAX_PATH] = {0};
+	if (desPath)
+	{
+		if (!*(desPath))
+			return FALSE;
+
+		strcpy_s(m_desPath, MAX_PATH, desPath);
+	}
+	else
+	{
+		if (!*(this->m_UnZipArg->desPath))
+			return FALSE;
+
+		strcpy_s(m_desPath, MAX_PATH, this->m_UnZipArg->desPath);
+	}
+
+	if (!this->ChangePartitionTable(NULL, m_desPath, NULL, order))
 		return FALSE;
-	if (!this->DismountVolume(this->m_UnZipArg->desPath))
+	if (!this->DismountVolume(m_desPath))
 		return FALSE;
-	if (!this->UpdateDisk(NULL, this->m_UnZipArg->desPath, NULL))
+	if (!this->UpdateDisk(NULL, m_desPath, NULL))
 		return FALSE;
 
 	return TRUE;

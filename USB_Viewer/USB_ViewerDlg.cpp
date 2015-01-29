@@ -56,6 +56,8 @@ BEGIN_MESSAGE_MAP(CUSB_ViewerDlg, CDialogEx)
 	ON_COMMAND(ID_CeateStart, &CUSB_ViewerDlg::OnCeatestart)
 	ON_COMMAND(ID_EXIT, &CUSB_ViewerDlg::OnExit)
 	ON_NOTIFY(NM_CLICK, IDC_LIST2, &CUSB_ViewerDlg::OnClickList2)
+ON_COMMAND(ID_ABOUT, &CUSB_ViewerDlg::OnAbout)
+ON_BN_CLICKED(IDCANCEL, &CUSB_ViewerDlg::OnBnClickedCancel)
 END_MESSAGE_MAP()
 // CUSB_ViewerDlg 对话框
 
@@ -271,7 +273,7 @@ BOOL CUSB_ViewerDlg::OnInitDialog()
 	}
 
 	m_wndPath->SetRedraw(TRUE);//显示
-
+	
 	
 	//////////////////////////////////////////////////////////////////////////
 
@@ -369,7 +371,36 @@ HCURSOR CUSB_ViewerDlg::OnQueryDragIcon()
 void CUSB_ViewerDlg::OnBnClickedOk()
 {
 	// TODO:  在此添加控件通知处理程序代码
+	CString str;
+	CListCtrl *m_ListCtrl = ((CListCtrl*)GetDlgItem(IDC_LIST2));
+	CComboBox *m_CComboBox = ((CComboBox*)GetDlgItem(IDC_COMBO1));
 
+	m_CComboBox->GetWindowText(str);
+	INT pos = str.Find(":\\");	//因为U盘的显示格式是"G:\ 16G"
+	str = str.Mid(pos - 1, 2);		//现在str表示"G:"
+
+	//获取要切换显示的分区序号, ps: m_ListCtrl->GetFirstSelectedItemPosition();  若选中则返回 >0, 否则 0
+	INT num = (INT)m_ListCtrl->GetFirstSelectedItemPosition();
+	if (0 == num)
+	{
+		AfxMessageBox(TEXT("亲, 请选择要让系统显示的U盘分区哈^_^"));
+		return;
+	}
+
+	CCreateStartDlg m_CreateStartDlg;
+	if (m_CreateStartDlg.RemountDrive(num, FALSE, TEXT(str.GetBuffer())))
+	{
+		m_ListCtrl->DeleteAllItems();	//清楚所有列表项
+		AfxMessageBox(TEXT("奥, 恭喜啊, 操作成功了 (0_0)\n  快看看U盘啦~"));
+	}
+	else
+	{
+		AfxMessageBox(TEXT("出大事了, 操作失败啊~啊~啊~~ T_T"));
+	}
+	this->OnCbnSelchangeCombo1();
+
+
+/*
 	CString str;
 	CListCtrl *m_ListCtrl = ((CListCtrl*)GetDlgItem(IDC_LIST2));
 	CComboBox *m_CComboBox = ((CComboBox*)GetDlgItem(IDC_COMBO1));
@@ -425,11 +456,13 @@ void CUSB_ViewerDlg::OnBnClickedOk()
 				memcpy_s(DPT2, 16, &sector[dwBytes - 50], 16);
 				memcpy_s(DPT3, 16, &sector[dwBytes - 34], 16);
 				memcpy_s(DPT4, 16, &sector[dwBytes - 18], 16);
+
+				
 				
 				memcpy_s(&sector[dwBytes - 66], 16, DPT2, 16);
 				memcpy_s(&sector[dwBytes - 50], 16, DPT1, 16);
-				memcpy_s(&sector[dwBytes - 34], 16, DPT4, 16);
-				memcpy_s(&sector[dwBytes - 18], 16, DPT3, 16);
+				memcpy_s(&sector[dwBytes - 34], 16, DPT3, 16);
+				memcpy_s(&sector[dwBytes - 18], 16, DPT4, 16);
 
 				dwBytes = 0;
 				SetFilePointer(hDrv, 0, NULL, FILE_BEGIN);
@@ -471,7 +504,7 @@ ERROR1:
 	m_CComboBox->GetWindowText(str);
 	str.Format("读取(%s)U盘错误", str);
 	m_ListCtrl->InsertItem(0, _T(str));
-	return;
+	return;*/
 }
 
 
@@ -597,14 +630,17 @@ void CUSB_ViewerDlg::OnCbnSelchangeCombo1()
 
 				Partition_Table list[4] = {0};
 				INT num = 0;
-				if (!(num = this->GetUSBInfo(&list, sector, dwBytes)))
+				if (!(num = this->GetUSBInfo(&list, &hDrv, NULL, NULL)))
 					goto ERROR2;
 							
 				int nIndex;
 				CHAR strSize[20] = {0};
 				for (int i = 0; i < num; i++)
 				{
-					sprintf_s(strSize, sizeof(strSize),"(%d)  %.1fG", i+1, list[i].size / 1024.0);
+					if (list[i].size < 1000)
+						sprintf_s(strSize, sizeof(strSize), "(%d)  %dM", i + 1, list[i].size);
+					else
+						sprintf_s(strSize, sizeof(strSize),"(%d)  %.1fG", i+1, list[i].size / 1024.0);
 					nIndex = m_ListCtrl->InsertItem(i, strSize);
 					if (nIndex < 0) 
 						goto ERROR2; 
@@ -668,11 +704,13 @@ BOOL CUSB_ViewerDlg::OnDeviceChange(UINT nEventType, DWORD_PTR dwData)
 			{
 				AfxMessageBox(TEXT("无效的分区名称!"));
 			}
+			this->OnCbnSelchangeCombo1();
 			return TRUE;
 		}
 		case 0x8004:		//DBT_DEVICEREMOVECOMPLETE==0x8004
 			::AfxMessageBox(TEXT("卸载了设备"), 1, 0);
 			this->GetUSB(this, IDC_COMBO1);
+			this->OnCbnSelchangeCombo1();
 			return TRUE;
 	}
 	return 0;
@@ -1150,9 +1188,10 @@ void CUSB_ViewerDlg::OnExit()
 
 INT CUSB_ViewerDlg::GetUSBInfo(
 	Partition_Table (*list)[4],
-	UCHAR sector[] /*= NULL*/,
-	INT sectorSize/* = 0*/,
-	HANDLE hDevice /*= NULL*/,
+/*
+	UCHAR sector[] / *= NULL* /,
+	INT sectorSize/ * = 0* /,*/
+	HANDLE *hDevice /*= NULL*/,
 	LPCSTR drive /*= NULL*/,
 	LPCSTR disk /*= NULL*/)
 {
@@ -1160,112 +1199,85 @@ INT CUSB_ViewerDlg::GetUSBInfo(
 		return FALSE;
 
 	INT m_sectorSize = 0;
+	INT res = FALSE;
 	UCHAR *m_sector = NULL;
 	HANDLE m_hDevice = INVALID_HANDLE_VALUE;
-	if (sector && sectorSize > 0)
-	{
-		m_sectorSize = sectorSize;
-		m_sector = sector;
-	}
-	else
-	{
-		if (hDevice && hDevice != INVALID_HANDLE_VALUE)
-		{
-			m_hDevice = hDevice;
-		}
-		else if (drive)
-		{
-			CCreateStartDlg m_CreateStartDlg;
-			if (!m_CreateStartDlg.GetDiskHandle(drive, disk, &m_hDevice))
-				return FALSE;
-		}
-		else if (disk)
-		{
-			CCreateStartDlg m_CreateStartDlg;
-			if (!m_CreateStartDlg.GetDiskHandle(drive, disk, &m_hDevice))
-				return FALSE;
-		}
-		else
-		{
-			return FALSE;
-		}
+	DISK_GEOMETRY diskGeometry;
+	CCreateStartDlg m_CreateStartDlg;
 
-		//
-		// 获得磁盘结构信息
-		//
-		DWORD dwBytes = 0;
-		DISK_GEOMETRY diskGeometry;
-		if (DeviceIoControl(m_hDevice,
-			IOCTL_DISK_GET_DRIVE_GEOMETRY,    // 调用了CTL_CODE macro宏
-			NULL,
-			0,
-			&diskGeometry,
-			sizeof(DISK_GEOMETRY),
-			&dwBytes,
-			NULL))
-		{
-			m_sectorSize = diskGeometry.BytesPerSector;    // 每sector扇区字节数
-			m_sector = new UCHAR[m_sectorSize]{ 0 };
-			if (sector)
-			{
-				ReadFile(m_hDevice, m_sector, m_sectorSize, &dwBytes, NULL);
-				if (dwBytes != m_sectorSize)
-				{
-					delete[] m_sector;
-					return FALSE;
-				}
-			}
-			else
-				return FALSE;
-		}
-		else
-			return FALSE;
-
+	if (hDevice && hDevice != INVALID_HANDLE_VALUE)
+	{
+		m_hDevice = *hDevice;
 	}
+	else if (!m_CreateStartDlg.GetDiskHandle(drive, disk, &m_hDevice))
+	{
+		return FALSE;
+	}
+
+	//获得U盘Geometry结构
+	if (!m_CreateStartDlg.GetDiskGeometry(&m_hDevice, NULL, NULL, &diskGeometry))
+		goto FINAL;
+
+	//获得U盘MBR扇区
+	m_sector = new UCHAR[diskGeometry.BytesPerSector]();
+	if (!(m_sectorSize = m_CreateStartDlg.GetDiskSector(m_sector, &m_hDevice, NULL, NULL, &diskGeometry)))
+		goto FINAL;
 
 	UCHAR type = 0;
 	INT size = 0, num = 0;
+	Partition_Table m_list;// = { 0 };
 	for (int i = 0; i < 4; i++)
 	{
 		type = m_sector[m_sectorSize - 62 + i * 16];		//// -62 == -66 + 4		文件系统标志位
 		
-		if (0x07 == type)
-		{
-			strcpy_s((*list)[num].type, sizeof((*list)[num].type), "ntfs");
-		}
-		else if (0x0C == type || 0x0B == type)
-		{
-			strcpy_s((*list)[num].type, sizeof((*list)[num].type), "fat32");
-		}
-		else
-		{
+		if (0x07 != type && 0x0C != type && 0x0B != type)	//用作分区表表项有效性检测, 当!=0x07等, 说明该表项无效
 			continue;
-		}
-		
-		for (int j = 0; j < 4; j++)
-		{
-			*(((UCHAR*)&size) + j) = m_sector[m_sectorSize - 66 + 12 + j + i * 16];		//分区表项中 分区大小 标志位	(注意大小端)
-		}
-		(*list)[num].size = LONG(size * m_sectorSize / 1024.0 / 1024.0);		//MB做单位
-		
-		num++;
 
+		//一定程度上做分区有效性检测, 如:无效的分区前预留扇区标志位, 无效的分区引导扇区等, 则continue
+		if (!m_CreateStartDlg.GetOnePartitionInfo(&m_list, &m_hDevice, num + 1, &diskGeometry))
+			continue;
+
+		//经过多重检测, 则表示有效, 故赋值
+		memcpy_s(&(*list)[num], sizeof((*list)[num]), &m_list, sizeof(m_list));
+
+		num++;
 	}
 
-	if (!hDevice || hDevice == INVALID_HANDLE_VALUE)
+	res = (num <= 0 ? FALSE : num);
+	goto FINAL;
+
+
+FINAL:
+	if (!hDevice || *hDevice == INVALID_HANDLE_VALUE)
 		CloseHandle(m_hDevice);
-	
 	if (m_sector)
 		delete[] m_sector;
-		
-	return num<= 0 ? FALSE : num;
+
+	return res;
 }
 
 void CUSB_ViewerDlg::OnClickList2(NMHDR *pNMHDR, LRESULT *pResult)
 {
 	LPNMITEMACTIVATE pNMItemActivate = reinterpret_cast<LPNMITEMACTIVATE>(pNMHDR);
 	// TODO:  在此添加控件通知处理程序代码
-	*pResult = 0;		//古月猜测	1表示告诉系统,已经做处理了,不用系统再处理该事件
+	*pResult = 1;		//古月猜测	1表示告诉系统,已经做处理了,不用系统再处理该事件
+
+	CListCtrl* m_CalList = ((CListCtrl*)GetDlgItem(IDC_LIST2));
+	POSITION pos = m_CalList->GetFirstSelectedItemPosition();	
+	static int prepos = 0;		//记录上一次选中的项
+	if (pos <= 0)
+	{
+		if (prepos > 0)
+			m_CalList->SetItemState(prepos - 1, LVIS_SELECTED , LVIS_SELECTED | LVS_SHOWSELALWAYS);
+	}
+	else
+	{
+		prepos = (int)pos;
+	}
+
+	//CString str;
+	//str.Format("%d", pos);
+	//MessageBox(str);
 
 /*
 	if (pNMItemActivate->iItem >= 0)
@@ -1293,3 +1305,16 @@ void CUSB_ViewerDlg::OnClickList2(NMHDR *pNMHDR, LRESULT *pResult)
 	
 }
 
+void CUSB_ViewerDlg::OnAbout()
+{
+	// TODO:  在此添加命令处理程序代码
+	CAboutDlg dlgAbout;
+	dlgAbout.DoModal();
+}
+
+
+void CUSB_ViewerDlg::OnBnClickedCancel()
+{
+	// TODO:  在此添加控件通知处理程序代码
+	CDialogEx::OnCancel();
+}

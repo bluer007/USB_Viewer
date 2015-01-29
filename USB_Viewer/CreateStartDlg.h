@@ -23,13 +23,16 @@ public:
 	INT DeletePartitionBootSector(HANDLE *hDevice, INT num, UCHAR sector[], INT sector_size, DISK_GEOMETRY* diskGeometry);
 	INT BackupPartitionBootSector(HANDLE *hDevice, INT partitionNum, DISK_GEOMETRY* diskGeometry);
 	INT RestorePartitionBootSector(HANDLE *hDevice, INT num, DISK_GEOMETRY* diskGeometry);
+	INT GetPartitionBootSector(UCHAR sector[], HANDLE *hDevice, INT partitionNum, DISK_GEOMETRY* diskGeometry);
+	INT GetOnePartitionInfo(Partition_Table *list, HANDLE *hDevice, INT partitionNum, DISK_GEOMETRY* diskGeometry);
+	INT GetActivePartitionNum(HANDLE *hDevice, LPCSTR drive, LPCSTR disk);
 	INT __stdcall UnZip();
 	INT StartUnZip();
 	INT Free7z(LPCSTR path = NULL, BOOL isDelete = FALSE);
 	INT LockVolume(HANDLE *hDisk, LPCSTR drive = NULL);
 	INT UnLockVolume();
 	INT DismountVolume(LPCSTR drive = NULL);
-	INT RemountDrive(INT remountNum = 2, BOOL isRestore = FALSE);
+	INT RemountDrive(INT remountNum = 2, BOOL isRestore = FALSE, LPCSTR desPath = NULL);
 	INT UpdateDisk(HANDLE *hDevice, LPCSTR drive, LPCSTR disk);
 	INT GetDriveHandle(LPCSTR drive, HANDLE *hDrive);
 	INT GetDiskHandle(LPCSTR drive, LPCSTR disk, HANDLE *hDevice);
