@@ -13,10 +13,13 @@ enum
 	NO_Active_Partition,		//用于CCreateStartDlg::GetActivePartitionNum()函数, 表示找不到活动分区
 };
 
+const DWORD FAT32_SIZE_LIMIT = 35;		//format命令要求fat32 > 35m
+const DWORD NTFS_SIZE_LIMIT = 2;		//format命令要求ntfs > 2m
+
 struct Partition_Table
 {
-	CHAR type[8];		//只有"ntfs"和"fat32"有效
-	LONG size;			//以MB为单位
+	CHAR type[8];						//只有"ntfs"和"fat32"有效
+	unsigned long long size;			//以MB为单位		(ULONG64)
 };
 
 struct FormatPartitionArg

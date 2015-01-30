@@ -26,6 +26,8 @@ public:
 	INT GetPartitionBootSector(UCHAR sector[], HANDLE *hDevice, INT partitionNum, DISK_GEOMETRY* diskGeometry);
 	INT GetOnePartitionInfo(Partition_Table *list, HANDLE *hDevice, INT partitionNum, DISK_GEOMETRY* diskGeometry);
 	INT GetActivePartitionNum(HANDLE *hDevice, LPCSTR drive, LPCSTR disk);
+	LARGE_INTEGER GetUSBAllSize(LPCSTR drive);
+
 	INT __stdcall UnZip();
 	INT StartUnZip();
 	INT Free7z(LPCSTR path = NULL, BOOL isDelete = FALSE);

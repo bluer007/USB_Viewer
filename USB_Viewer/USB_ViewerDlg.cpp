@@ -6,7 +6,7 @@
 #include "afxdialogex.h"
 
 #include "setupapi.h"
-#include "hidsdi.h"		//古月guyue
+//#include "hidsdi.h"		//古月guyue
 #include "USB_Viewer.h"
 #include "USB_ViewerDlg.h"
 #include "CreateStartDlg.h"	//guyue
@@ -377,7 +377,9 @@ void CUSB_ViewerDlg::OnBnClickedOk()
 
 	m_CComboBox->GetWindowText(str);
 	INT pos = str.Find(":\\");	//因为U盘的显示格式是"G:\ 16G"
+	if (pos == -1)return;		//针对	无用的空白选项
 	str = str.Mid(pos - 1, 2);		//现在str表示"G:"
+	
 
 	//获取要切换显示的分区序号, ps: m_ListCtrl->GetFirstSelectedItemPosition();  若选中则返回 >0, 否则 0
 	INT num = (INT)m_ListCtrl->GetFirstSelectedItemPosition();
@@ -397,6 +399,7 @@ void CUSB_ViewerDlg::OnBnClickedOk()
 	{
 		AfxMessageBox(TEXT("出大事了, 操作失败啊~啊~啊~~ T_T"));
 	}
+	this->GetUSB(this, IDC_COMBO1);
 	this->OnCbnSelchangeCombo1();
 
 
@@ -534,8 +537,17 @@ INT CUSB_ViewerDlg::GetUSB(CDialogEx* dialog, INT ID)
 				(PULARGE_INTEGER)&i64TotalBytes,
 				(PULARGE_INTEGER)&i64FreeBytes);
 
-			strTemp.Format("%s  %.1fG", &Drive[i], i64TotalBytes / (1024.0 * 1024.0 * 1024.0));
-			((CComboBox*)dialog->GetDlgItem(ID))->AddString(strTemp);
+			if (i64TotalBytes / (1024.0 * 1024.0) <= 1000)	
+			{
+				//容量少于1000M 就用mb做显示单位
+				strTemp.Format("%s  %.0fM", &Drive[i], i64TotalBytes / (1024.0 * 1024.0));
+				((CComboBox*)dialog->GetDlgItem(ID))->AddString(strTemp);
+			}
+			else
+			{
+				strTemp.Format("%s  %.1fG", &Drive[i], i64TotalBytes / (1024.0 * 1024.0 * 1024.0));
+				((CComboBox*)dialog->GetDlgItem(ID))->AddString(strTemp);
+			}	
 			
 			IsFind = TRUE;
 		}
@@ -564,10 +576,10 @@ void CUSB_ViewerDlg::OnCbnSelchangeCombo1()
 	m_ListCtrl->DeleteAllItems();	//清楚所有列表项
 	
 	m_CComboBox->GetWindowText(str);
-	INT pos = str.Find("\\");	//因为U盘的显示格式是"G:\ 16G"
-	str = str.Mid(0, pos);		//现在str表示"G:"
-	if (strcmp(str.GetBuffer(), "") == 0)	
-		return;		//针对	无用的空白选项
+	INT pos = str.Find(":\\");	//因为U盘的显示格式是"G:\ 16G"
+	if (pos == -1)return;	//针对  空白的选项
+	str = str.Mid(pos - 1, 2);		//现在str表示"G:"
+
 
 	str = "\\\\.\\" + str;
 	HANDLE hDrv = CreateFile(str, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
