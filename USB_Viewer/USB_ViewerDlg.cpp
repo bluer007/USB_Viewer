@@ -10,6 +10,7 @@
 #include "USB_Viewer.h"
 #include "USB_ViewerDlg.h"
 #include "CreateStartDlg.h"	//guyue
+#include "PartitionDlg.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -58,6 +59,7 @@ BEGIN_MESSAGE_MAP(CUSB_ViewerDlg, CDialogEx)
 	ON_NOTIFY(NM_CLICK, IDC_LIST2, &CUSB_ViewerDlg::OnClickList2)
 ON_COMMAND(ID_ABOUT, &CUSB_ViewerDlg::OnAbout)
 ON_BN_CLICKED(IDCANCEL, &CUSB_ViewerDlg::OnBnClickedCancel)
+ON_COMMAND(ID_Partition, &CUSB_ViewerDlg::OnPartition)
 END_MESSAGE_MAP()
 // CUSB_ViewerDlg 对话框
 
@@ -520,7 +522,7 @@ INT CUSB_ViewerDlg::GetUSB(CDialogEx* dialog, INT ID)
 	TCHAR Drive[MAX_PATH] = { 0 };
 	DWORD len = ::GetLogicalDriveStrings(sizeof(Drive) / sizeof(TCHAR) , Drive);
 
-	INT i = 0;
+	INT i = 0, num = 0;
 	BOOL IsFind = FALSE;
 	while (strlen(&Drive[i]) > 0)
 	{
@@ -548,7 +550,7 @@ INT CUSB_ViewerDlg::GetUSB(CDialogEx* dialog, INT ID)
 				strTemp.Format("%s  %.1fG", &Drive[i], i64TotalBytes / (1024.0 * 1024.0 * 1024.0));
 				((CComboBox*)dialog->GetDlgItem(ID))->AddString(strTemp);
 			}	
-			
+			num++;
 			IsFind = TRUE;
 		}
 
@@ -556,14 +558,16 @@ INT CUSB_ViewerDlg::GetUSB(CDialogEx* dialog, INT ID)
 	}
 	if (IsFind)
 	{
-		((CComboBox*)dialog->GetDlgItem(ID))->AddString("");
+		((CComboBox*)dialog->GetDlgItem(ID))->AddString("");	//sel==0;
+		((CComboBox*)dialog->GetDlgItem(ID))->SetCurSel(1);
 	}
 	else
 	{
-		((CComboBox*)dialog->GetDlgItem(ID))->AddString("找不到U盘");
+		((CComboBox*)dialog->GetDlgItem(ID))->AddString("找不到U盘");	//sel == 0;
+		((CComboBox*)dialog->GetDlgItem(ID))->SetCurSel(0);
 	}
 
-	return TRUE;
+	return num;
 }
 
 //每当选择的U盘改变时候, 自动更新U盘的分区表显示
@@ -1329,4 +1333,12 @@ void CUSB_ViewerDlg::OnBnClickedCancel()
 {
 	// TODO:  在此添加控件通知处理程序代码
 	CDialogEx::OnCancel();
+}
+
+
+void CUSB_ViewerDlg::OnPartition()
+{
+	// TODO:  在此添加命令处理程序代码
+	CPartitionDlg dlgPartition;
+	dlgPartition.DoModal();
 }
