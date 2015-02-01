@@ -59,6 +59,7 @@ public:
 	
 	afx_msg void OnBnClickedOk();
 	afx_msg LRESULT OnGetResult(WPARAM wParam, LPARAM lParam);
+	afx_msg BOOL OnDeviceChange(UINT nEventType, DWORD_PTR dwData);		//检测U盘插入  拔出
 
 	// 生成的消息映射函数
 	virtual BOOL OnInitDialog();

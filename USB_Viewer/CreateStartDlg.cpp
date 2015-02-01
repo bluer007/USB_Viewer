@@ -44,7 +44,7 @@ BOOL CCreateStartDlg::OnInitDialog()
 
 	// TODO:  在此添加额外的初始化代码
 	this->m_USB_ViewerDlg->GetUSB(this, IDC_COMBO1);
-	((CButton*)this->GetDlgItem(IDC_RADIO1))->SetCheck(TRUE);
+	((CButton*)this->GetDlgItem(IDC_RADIO1))->SetCheck(TRUE);		//单选框 设置为 推荐选项--格式化再做启动盘
 
 
 	return TRUE;  // 除非将焦点设置到控件，否则返回 TRUE
@@ -52,6 +52,7 @@ BOOL CCreateStartDlg::OnInitDialog()
 BEGIN_MESSAGE_MAP(CCreateStartDlg, CDialogEx)
 ON_BN_CLICKED(IDOK, &CCreateStartDlg::OnBnClickedOk)
 ON_MESSAGE(WM_MYMSG, &CCreateStartDlg::OnGetResult)
+ON_WM_DEVICECHANGE()		//用于接收设备(U盘)变动, 已更新界面的消息
 END_MESSAGE_MAP()
 
 
@@ -105,7 +106,7 @@ void CCreateStartDlg::OnBnClickedOk()
 
 	usbSize.QuadPart = (usbSize.QuadPart / (1024 * 1024)) + 1;	//将U盘总大小转换为MB, +1是保险起见
 	ntfsSize.QuadPart = usbSize.QuadPart - fat32size.QuadPart;		//剩下的U盘容量分配给ntfs分区
-	Partition_Table a[] = 
+	Partition_Table table[] = 
 	{
 		{ "ntfs", (ULONG64)ntfsSize.QuadPart },//{"ntfs", 1024 },		//1024MB == 2097152扇区	2097152
 		{"fat32", (ULONG64)fat32size.QuadPart },		//2097152mb == 4194304	4194304			ntfs	fat32
@@ -119,7 +120,7 @@ void CCreateStartDlg::OnBnClickedOk()
 	else
 		ZeroMemory(this->m_UnZipArg, sizeof(*(this->m_UnZipArg)));
 	strcpy_s(this->m_UnZipArg->desPath, MAX_PATH, TEXT(str.GetBuffer()));
-	this->Partition(TEXT(str.GetBuffer()), sizeof(a)/sizeof(Partition_Table), a, 2,
+	this->Partition(TEXT(str.GetBuffer()), sizeof(table)/sizeof(Partition_Table), table, 2,
 										this->GetSafeHwnd(), NULL);		
 }
 
@@ -617,7 +618,7 @@ INT CCreateStartDlg::GetOnePartitionInfo(Partition_Table *list, HANDLE *hDevice,
 	memcpy_s(name, sizeof(name), &sector[3], 4);		//sector[3,4,5,6]是NTFS的File system ID ("NTFS")
 	
 	//判断分区的文件系统
-	if (strcmp(name, "NTFS") == 0)
+	if (strcmp(name, TEXT("NTFS")) == 0)
 	{
 		type = NTFS;
 	}
@@ -625,7 +626,7 @@ INT CCreateStartDlg::GetOnePartitionInfo(Partition_Table *list, HANDLE *hDevice,
 	{
 		ZeroMemory(name, sizeof(name));
 		memcpy_s(name, sizeof(name), &sector[82], 5);		//sector[82,83,84,85,86]是FAT32的File system标志位("FAT32")
-		if (strcmp(name, "FAT32") == 0)
+		if (strcmp(name, TEXT("FAT32")) == 0)
 			type = FAT32;
 		else
 			goto FINAL;		//type = UNKNOW;
@@ -875,11 +876,13 @@ INT CCreateStartDlg::CreatePartitionTable(UCHAR sector[], INT sector_size, INT n
 		sys_start_pos[1] = unsigned char(temp_pre % (diskGeometry->TracksPerCylinder * diskGeometry->SectorsPerTrack) % diskGeometry->SectorsPerTrack + 1);	//分区开始扇区
 		sys_start_pos[0] = unsigned char(temp_pre % (diskGeometry->TracksPerCylinder * diskGeometry->SectorsPerTrack) / diskGeometry->SectorsPerTrack);	//分区开始磁头
 
-		if (strcmp(list[i].type, _T("ntfs")) == 0)
+		if (strcmp(list[i].type, _T("ntfs")) == 0
+			|| strcmp(list[i].type, _T("NTFS")) == 0)
 		{
 			sys_filesystem = 0x07;		//文件系统标志位
 		}
-		else if (strcmp(list[i].type, _T("fat32")) == 0)
+		else if (strcmp(list[i].type, _T("fat32")) == 0
+			|| strcmp(list[i].type, _T("FAT32")) == 0)
 		{
 			sys_filesystem = 0x0c;
 		}
@@ -1312,14 +1315,16 @@ INT CCreateStartDlg::InstallPBR(HANDLE *hDevice, LPCSTR drive, LPCSTR disk, DISK
 		goto ERROR1;
 	DWORD pbr_data_size = 0;
 	unsigned char* pbr_data = NULL;
-	if (strcmp(list.type, TEXT("ntfs")) == 0)
+	if (strcmp(list.type, TEXT("ntfs")) == 0	\
+		||strcmp(list.type, _T("NTFS")) == 0)
 	{
 		//将活动分区(ntfs)的引导扇区特有部分(前84个字节)复制到pbr_ntfs_data对应位置上
 		memcpy_s(&pbr_ntfs_data[0], 84, &sector[0], 84);
 		pbr_data = pbr_ntfs_data;
 		pbr_data_size = sizeof(pbr_ntfs_data);
 	}
-	else if (strcmp(list.type, TEXT("fat32")) == 0)
+	else if (strcmp(list.type, TEXT("fat32")) == 0	\
+		|| strcmp(list.type, _T("FAT32")) == 0)
 	{
 		//将活动分区(fat32)的引导扇区特有部分(前90个字节)复制到pbr_fat32_data对应位置上
 		memcpy_s(&pbr_fat32_data[0], 90, &sector[0], 90);
@@ -1671,4 +1676,19 @@ LARGE_INTEGER CCreateStartDlg::GetUSBAllSize(LPCSTR drive)
 	size.QuadPart = (ULONG64)diskGeometry.Cylinders.QuadPart * (ULONG64)diskGeometry.TracksPerCylinder *
 		(ULONG64)diskGeometry.SectorsPerTrack * (ULONG64)diskGeometry.BytesPerSector;
 	return size;
+}
+
+BOOL CCreateStartDlg::OnDeviceChange(UINT nEventType, DWORD_PTR dwData)
+{
+	//nEventType就是WM_DEVICECHANGE消息的wParam参数，具体的值参考msdn
+	switch (nEventType)
+	{
+	case 0x8000:		// DBT_DEVICEARRIVAL==0x8000		u盘插入
+	case 0x8004:		//DBT_DEVICEREMOVECOMPLETE==0x8004	u盘拔出
+	{
+		this->m_USB_ViewerDlg->GetUSB(this, IDC_SELECT_USB);	//重新加载U盘
+		return TRUE;
+	}
+	}
+	return 0;
 }

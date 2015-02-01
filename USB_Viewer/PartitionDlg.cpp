@@ -64,6 +64,8 @@ ON_BN_CLICKED(IDC_ACTIVE3, &CPartitionDlg::OnBnClickedActive3)
 ON_BN_CLICKED(IDC_ACTIVE4, &CPartitionDlg::OnBnClickedActive4)
 ON_BN_CLICKED(IDCANCEL, &CPartitionDlg::OnBnClickedCancel)
 ON_BN_CLICKED(IDOK, &CPartitionDlg::OnBnClickedOk)
+ON_MESSAGE(WM_MYMSG, &CPartitionDlg::OnMymsg)
+ON_WM_DEVICECHANGE()		//用于接收设备(U盘)变动, 已更新界面的消息
 END_MESSAGE_MAP()
 
 
@@ -109,6 +111,7 @@ BOOL CPartitionDlg::OnInitDialog()
 	this->p_file_system[0]->SetCurSel(0);
 	this->p_unit[0]->SetCurSel(0);
 
+	this->m_FormatState = FALSE;	//还没有分区
 
 	return TRUE;  // return TRUE unless you set the focus to a control
 				  // 异常:  OCX 属性页应返回 FALSE
@@ -117,15 +120,20 @@ BOOL CPartitionDlg::OnInitDialog()
 void CPartitionDlg::OnBnClickedOk()
 {
 	// TODO:  在此添加控件通知处理程序代码
-	/*if (0 == this->m_drive.CompareNoCase(TEXT("")))
+	if (0 == this->m_drive.CompareNoCase(TEXT("")))
 	{
 		AfxMessageBox(TEXT("亲, 先选择U盘哈 ^_^"));
 		return;
-	}*/
+	}
+
+	if (this->m_FormatState)
+	{
+		AfxMessageBox(TEXT("分区ing咧, 请稍后^_^"));
+		return;
+	}
 
 
-
-
+/*
 	CString size, file_system, unit;
 	INT restSizeNum = 0, activeNum = 0;		//表示 第几个 选择剩余容量的分区 和 第几个 设置活动分区的分区 
 	for (int i = 0, j = 0; i < 4; i++)
@@ -142,24 +150,49 @@ void CPartitionDlg::OnBnClickedOk()
 				return;
 			}
 		}
-	}
+	}*/
 
-
+	CString size, file_system, unit, temp;
 	Partition_Table m_table[4] ={0};
+	bool isActive[4] = {0};		//分别对应四个分区是否为活动分区
 	LARGE_INTEGER usb_size;		//u盘总容量
 	ULONG64 allSize = 0;	//所有分区总大小
-	INT no_size = 0;	//没有填写  大小 的分区的计数
+	//restSizeNum表示 第几个 选择剩余容量的分区 ,activeNum表第几个 设置活动分区的分区 ;	
+	//noSizeCount 表 没有填写  大小 的分区的计数, restSizeCount 表 选了 剩余容量 的分区计数, allSizeCount 表 选了 全部容量 的分区计数
+	INT noSizeCount = 0, restSizeCount = 0, allSizeCount = 0, restSizeNum = 0, activeNum = 0;
 	//MB做单位
-	usb_size.QuadPart = (this->m_CreateStartDlg->GetUSBAllSize(this->m_drive.GetBuffer()).QuadPart / (1024.0 * 1024.0));	
+	usb_size.QuadPart = (LONGLONG)(this->m_CreateStartDlg->GetUSBAllSize(this->m_drive.GetBuffer()).QuadPart / (1024.0 * 1024.0));
 	for (int i = 0; i < 4; i++)
 	{
 		this->p_size[i]->GetWindowText(size);
 
 		if (!*(size.GetBuffer()))
 		{
-			no_size++;
+			noSizeCount++;		//计数  没有填写 大小 的分区总数
 			continue;
 		}
+
+		if (this->p_size[i]->GetCurSel() == 0 && size.Find(TEXT_ALL_SIZE) > -1)		//选择了  全部容量 也合法
+		{
+			if (++allSizeCount > 1)
+			{
+				AfxMessageBox(TEXT("超过一个分区【大小】选择了 U盘的全部容量哦^_^"));
+				return;
+			}
+			this->p_unit[i]->SetCurSel(0);		//避免下面误报 没有 填写 单位
+		}
+		else if (this->p_size[i]->GetCurSel() == 1 && size.Find(TEXT_REST_SIZE) > -1)		//选择了  剩余容量 也合法
+		{
+			if (++restSizeCount > 1)
+			{
+				restSizeNum = 0;
+				AfxMessageBox(TEXT("超过一个分区【大小】选择了 U盘的剩余容量哦^_^"));
+				return;
+			}
+			restSizeNum = i + 1;		//restSizeNum表示 第几个 选择剩余容量的分区
+			this->p_unit[i]->SetCurSel(0);		//避免下面误报 没有 填写 单位
+		}
+
 		if (this->IsNumber(size) 
 			|| (this->p_size[i]->GetCurSel() == 0 && size.Find(TEXT_ALL_SIZE) > -1)		//选择了  全部容量 也合法
 			|| (this->p_size[i]->GetCurSel() == 1 && size.Find(TEXT_REST_SIZE) > -1))		//选择了  剩余容量 也合法
@@ -167,31 +200,34 @@ void CPartitionDlg::OnBnClickedOk()
 			this->p_file_system[i]->GetWindowText(file_system);
 			if (!*(file_system.GetBuffer()))
 			{
-				file_system.Format(TEXT("第 %d 分区还没选择 文件系统 呢"), i + 1);
+				file_system.Format(TEXT("第 %d 分区还没选择【文件系统】呢"), i + 1);
 				AfxMessageBox(file_system.GetBuffer());
 				return;
 			}
 			this->p_unit[i]->GetWindowText(unit);
 			if (!*(unit.GetBuffer()))
 			{
-				unit.Format(TEXT("第 %d 分区还没选择 单位 呢"), i + 1);
+				unit.Format(TEXT("第 %d 分区还没选择【单位】呢"), i + 1);
 				AfxMessageBox(unit.GetBuffer());
 				return;
 			}
 		}
 		else
 		{
-			size.Format(TEXT("第 %d 分区要输入有效大小哈"), i+1);
+			size.Format(TEXT("第 %d 分区要输入有效【大小】哈"), i+1);
 			AfxMessageBox(size.GetBuffer());
 			return;
 		}
 
 		if (this->p_active[i]->GetCheck())
+		{
+			isActive[i] = TRUE;		//对应分区的 活动标志 位设为true
 			activeNum = i + 1;		//记录活动分区的号
+		}
 
 		
 		//经过上面检测, 起码说明 这一项分区信息 填写正确
-		//开始填写m_table  该分区的信息
+		//开始填写 m_table  该分区的信息
 		if (this->p_size[i]->GetCurSel() == 0 && size.Find(TEXT_ALL_SIZE) > -1)
 		{
 			m_table[i].size = (ULONG64)usb_size.QuadPart;			//选择了  全部容量 也合法
@@ -216,21 +252,24 @@ void CPartitionDlg::OnBnClickedOk()
 		}
 
 		if (file_system.CompareNoCase(TEXT("NTFS")) == 0)
-			strcpy_s(m_table[i].type, sizeof(m_table[i].type), TEXT("ntfs"));
+			strcpy_s(m_table[i].type, sizeof(m_table[i].type), TEXT("NTFS"));
 		else
-			strcpy_s(m_table[i].type, sizeof(m_table[i].type), TEXT("fat32"));
+			strcpy_s(m_table[i].type, sizeof(m_table[i].type), TEXT("FAT32"));
+
 		//到这里, 填写m_table  该分区的信息完毕
 
+
 		//开始计算截止为止 分区总大小
-		if ((allSize += m_table[i].size) > usb_size.QuadPart)
+		if ((allSize += m_table[i].size) > (ULONG64)usb_size.QuadPart)
 		{
 			//同时 也处理了  多次选择  全部容量  的问题
-			AfxMessageBox(TEXT("所有分区的总大小 超过 U盘容量啦"));
+			AfxMessageBox(TEXT("分区的【总大小】超过 U盘容量啦"));
 			return;
 		}
 	}
-	if (no_size >= 4)
+	if (noSizeCount >= 4)
 	{
+		//说明 四个分区 都没有填写 大小
 		AfxMessageBox(TEXT("请填写好分区设置哈"));
 		return;
 	}
@@ -244,37 +283,66 @@ void CPartitionDlg::OnBnClickedOk()
 	
 	//处理 m_table 中的 size 值 可能出现 0 , 则除之
 	//顺便 编写 确认框 文字
-	CString temp;
-	temp.Format(TEXT("选择U盘:  %s  总容量: %.1fG\n"), this->m_drive.GetBuffer(), (usb_size.QuadPart / 1024.0));
+	//做format支持的文件系统  最低容量  检测
+	temp.Format(TEXT("选择U盘:  %s  \nU盘总容量:  %ldM  %.1fG \n\n"), this->m_drive.GetBuffer(), (long)usb_size.QuadPart, (usb_size.QuadPart / 1024.0));
+	INT itemCount = 0;
+	for (int i = 0; i < 4; i++)
+	{
+		if (m_table[i].size > 0 && m_table[i].size <= (unsigned long long)usb_size.QuadPart)
+		{
+			//开始 做format支持的文件系统  最低容量  检测
+			if (strcmp(m_table[i].type, TEXT("NTFS")) == 0
+				|| strcmp(m_table[i].type, TEXT("ntfs")) == 0)
+			{
+				if (m_table[i].size <= NTFS_SIZE_LIMIT)
+				{
+					temp.Format(TEXT("第 %d 分区, NTFS最低大小是 %dM 哦"), i + 1, NTFS_SIZE_LIMIT + 1);
+					AfxMessageBox(temp);
+					return;
+				}
+			}
+			else
+			{
+				if (m_table[i].size <= FAT32_SIZE_LIMIT)
+				{
+					temp.Format(TEXT("第 %d 分区, FAT32最低大小是 %dM 哦"), i + 1, FAT32_SIZE_LIMIT + 1);
+					AfxMessageBox(temp);
+					return;
+				}
+			}
+			if (isActive[i])
+				activeNum = itemCount + 1;
+			isActive[itemCount] = isActive[i];
+			sprintf_s(m_table[itemCount].type, sizeof(m_table[itemCount].type), m_table[i].type);
+			m_table[itemCount].size = m_table[i].size;
+			temp.AppendFormat(TEXT("第%d分区:  %ldM  %.1fG  %s \n"), (itemCount + 1), (long)m_table[itemCount].size, (m_table[itemCount].size / 1024.0), m_table[itemCount].type);
+			itemCount++;
+		}
+		else if(m_table[i].size == 0)
+		{	//当 大小 为0 , 且是活动分区时, 无效
+			if (isActive[i])
+				activeNum = 0;
+		}
+	}
+
 	if (activeNum > 0)
 	{
-		temp.AppendFormat(TEXT("活动分区:  第%d分区 \n"), activeNum);
+		temp.AppendFormat(TEXT("活动分区:  第%d分区 \n\n"), activeNum);
 	}
 	else
 	{
-		temp.AppendFormat(TEXT("活动分区:  无 \n"));
-	}
-	for (int i = 0, j = 0; i < 4; i++)
-	{
-		if (m_table[i].size != 0 && m_table[i].size <= usb_size.QuadPart)
-		{
-			sprintf_s(m_table[j].type, sizeof(m_table[j].type), m_table[i].type);
-			m_table[j].size = m_table[i].size;
-			m_table[j].type[5] = '\0';
-			m_table[j].type[6] = '\0';
-			m_table[j].type[7] = '\0';
-			temp.AppendFormat(TEXT("第%d分区:  %ldM  %.1fG  %s \n"), (j + 1), (long)m_table[j].size, (m_table[j].size / 1024.0), m_table[j].type);
-			j++;
-		}
+		temp.AppendFormat(TEXT("活动分区:  无 \n\n"));
 	}
 
 	temp.Append(TEXT("\n分区将清除U盘所有数据, 请做好备份后再确认!\n"));
 	//弹出确认框 供 用户最后确认
-	if (IDOK == AfxMessageBox(temp, MB_YESNO))
+	if (IDYES == AfxMessageBox(temp, MB_YESNO))
 	{
 		//经过上面检测 和 确认, 说明用户所有设置有效 , 可以分区
-		//m_CreateStartDlg->Partition(this->m_drive.GetBuffer(), sizeof(m_table) / sizeof(Partition_Table), m_table, activeNum,
-			//this->GetSafeHwnd(), NULL);
+		this->m_FormatState = TRUE;
+		if(!m_CreateStartDlg->Partition(this->m_drive.GetBuffer(), itemCount, m_table, activeNum,
+			this->GetSafeHwnd(), NULL))
+			this->m_FormatState = FALSE;
 	}
 	//CDialogEx::OnOK();
 }
@@ -328,16 +396,16 @@ INT CPartitionDlg::SetSize(INT sizeNum)
 	}
 
 	LARGE_INTEGER usb_size = this->m_CreateStartDlg->GetUSBAllSize(this->m_drive.GetBuffer());
-	usb_size.QuadPart = usb_size.QuadPart / (1024.0 * 1024.0);	//转化为MB
+	usb_size.QuadPart = (LONGLONG)(usb_size.QuadPart / (1024.0 * 1024.0));	//转化为MB
 
 	CString str;
 	this->p_unit[sizeNum]->GetWindowText(str);
 	if (str.Find(TEXT("GB")) > -1)
 	{
 		this->p_size[sizeNum]->ResetContent();
-		str.Format(TEXT("%.1f(全部)"), usb_size.QuadPart / 1024.0);
+		str.Format(TEXT("%.1fG(全部)"), usb_size.QuadPart / 1024.0);
 		this->p_size[sizeNum]->AddString(str.GetBuffer());
-		this->p_size[sizeNum]->AddString(TEXT("剩余容量"));
+		this->p_size[sizeNum]->AddString(TEXT_REST_SIZE);
 		for (int i = 1; i <= (usb_size.QuadPart / 1024); i++)		//转化为GB
 		{
 			str.Format(TEXT("%d"), i);
@@ -347,7 +415,7 @@ INT CPartitionDlg::SetSize(INT sizeNum)
 	else if (str.Find(TEXT("MB")) > -1)
 	{
 		this->p_size[sizeNum]->ResetContent();	//清除原来内容
-		str.Format(TEXT("%d(全部)"), usb_size.QuadPart);
+		str.Format(TEXT("%dG(全部)"), usb_size.QuadPart);
 		this->p_size[sizeNum]->AddString(str.GetBuffer());
 		this->p_size[sizeNum]->AddString(TEXT_REST_SIZE);// TEXT("剩余容量"));
 		for (int i = 500; i <= (usb_size.QuadPart); i += 500)
@@ -357,7 +425,12 @@ INT CPartitionDlg::SetSize(INT sizeNum)
 		}
 	}
 	else
-		return FALSE;
+	{
+		this->p_size[sizeNum]->ResetContent();	//清除原来内容
+		str.Format(TEXT("%.1fG(全部)"), usb_size.QuadPart / 1024.0);
+		this->p_size[sizeNum]->AddString(str.GetBuffer());
+		this->p_size[sizeNum]->AddString(TEXT_REST_SIZE);
+	}
 
 	return TRUE;
 }
@@ -420,4 +493,38 @@ void CPartitionDlg::OnBnClickedCancel()
 {
 	// TODO:  在此添加控件通知处理程序代码
 	CDialogEx::OnCancel();
+}
+
+
+afx_msg LRESULT CPartitionDlg::OnMymsg(WPARAM wParam, LPARAM lParam)
+{
+	if (this->m_FormatState)
+	{
+		if (FORMAT_OK == wParam)
+		{
+			AfxMessageBox("U盘分区成功");
+		}
+		else if (FORMAT_ERROR == wParam)
+		{
+			AfxMessageBox("U盘分区失败");
+		}
+		this->m_FormatState = FALSE;
+	}
+	return 0;
+}
+
+BOOL CPartitionDlg::OnDeviceChange(UINT nEventType, DWORD_PTR dwData)
+{
+	//nEventType就是WM_DEVICECHANGE消息的wParam参数，具体的值参考msdn
+	switch (nEventType)
+	{
+	case 0x8000:		// DBT_DEVICEARRIVAL==0x8000		u盘插入
+	case 0x8004:		//DBT_DEVICEREMOVECOMPLETE==0x8004	u盘拔出
+		{
+			this->m_USB_ViewerDlg->GetUSB(this, IDC_SELECT_USB);	//重新加载U盘
+			this->OnCbnSelchangeSelectUsb();	//使设置this->m_drive;
+			return TRUE;
+		}
+	}
+	return 0;
 }

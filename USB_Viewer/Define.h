@@ -13,8 +13,8 @@ enum
 	NO_Active_Partition,		//用于CCreateStartDlg::GetActivePartitionNum()函数, 表示找不到活动分区
 };
 
-const DWORD FAT32_SIZE_LIMIT = 35;		//format命令要求fat32 > 35m
-const DWORD NTFS_SIZE_LIMIT = 2;		//format命令要求ntfs > 2m
+const DWORD FAT32_SIZE_LIMIT = 35;		//format命令要求fat32 > 35MB
+const DWORD NTFS_SIZE_LIMIT = 2;		//format命令要求ntfs > 2MB
 
 struct Partition_Table
 {

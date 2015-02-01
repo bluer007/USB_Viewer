@@ -57,9 +57,9 @@ BEGIN_MESSAGE_MAP(CUSB_ViewerDlg, CDialogEx)
 	ON_COMMAND(ID_CeateStart, &CUSB_ViewerDlg::OnCeatestart)
 	ON_COMMAND(ID_EXIT, &CUSB_ViewerDlg::OnExit)
 	ON_NOTIFY(NM_CLICK, IDC_LIST2, &CUSB_ViewerDlg::OnClickList2)
-ON_COMMAND(ID_ABOUT, &CUSB_ViewerDlg::OnAbout)
-ON_BN_CLICKED(IDCANCEL, &CUSB_ViewerDlg::OnBnClickedCancel)
-ON_COMMAND(ID_Partition, &CUSB_ViewerDlg::OnPartition)
+	ON_COMMAND(ID_ABOUT, &CUSB_ViewerDlg::OnAbout)
+	ON_BN_CLICKED(IDCANCEL, &CUSB_ViewerDlg::OnBnClickedCancel)
+	ON_COMMAND(ID_Partition, &CUSB_ViewerDlg::OnPartition)
 END_MESSAGE_MAP()
 // CUSB_ViewerDlg 对话框
 
@@ -239,18 +239,23 @@ BOOL CUSB_ViewerDlg::OnInitDialog()
 
 	//////////////////////////////////////////////////////////////////////////
 
-	//控件内容初始化
-	((CButton*)GetDlgItem(IDOK))->EnableWindow(FALSE);
-	this->GetUSB(this, IDC_COMBO1);		//搜索并显示U盘盘符
-
 	CListCtrl *m_wndPath = ((CListCtrl*)GetDlgItem(IDC_LIST2));
 	m_wndPath->SetExtendedStyle(m_wndPath->GetExtendedStyle() | LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES );	//LVS_EX_CHECKBOXES
 	m_wndPath->InsertColumn(0, _T("U盘中的分区大小"));//添加列
 	m_wndPath->InsertColumn(1, _T("文件系统"));
 	m_wndPath->SetColumnWidth(0, 150);//设置列宽
-	m_wndPath->SetColumnWidth(1, 350);
-	m_wndPath->SetRedraw(FALSE);//防止重绘
+	m_wndPath->SetColumnWidth(1, 163);
 
+	m_wndPath->SetRedraw(TRUE);//显示
+
+	//控件内容初始化
+	((CButton*)GetDlgItem(IDOK))->EnableWindow(FALSE);
+	this->GetUSB(this, IDC_COMBO1);		//搜索并显示U盘盘符
+	this->OnCbnSelchangeCombo1();		//更新列表框中 分区表 的显示
+
+	//m_wndPath->SetRedraw(FALSE);//防止重绘
+
+/*
 	int nIndex;
 	//char|TCHAR项目属性->字符集：使用多字节字符集
 	TCHAR Path[MAX_PATH + 1];//TCHAR取代char  MAX_PATH最长路径
@@ -272,9 +277,9 @@ BOOL CUSB_ViewerDlg::OnInitDialog()
 			}
 			m_wndPath->SetItemText(nIndex, 1, Path);
 		}
-	}
+	}*/
 
-	m_wndPath->SetRedraw(TRUE);//显示
+	//m_wndPath->SetRedraw(TRUE);//显示
 	
 	
 	//////////////////////////////////////////////////////////////////////////
@@ -513,7 +518,7 @@ ERROR1:
 }
 
 
-// 获取当前所有U盘设备,并显示到界面
+// 获取当前所有U盘设备,并显示到组合框中
 INT CUSB_ViewerDlg::GetUSB(CDialogEx* dialog, INT ID)
 {
 	CString strTemp;
@@ -700,8 +705,9 @@ BOOL CUSB_ViewerDlg::OnDeviceChange(UINT nEventType, DWORD_PTR dwData)
 		case 0x8000:		// DBT_DEVICEARRIVAL==0x8000
 		{
 			this->GetUSB(this, IDC_COMBO1);
+			this->OnCbnSelchangeCombo1();		//更新列表框中 分区表 的显示
 
-			DEV_BROADCAST_VOLUME* pDisk = (DEV_BROADCAST_VOLUME*)dwData;
+			/*DEV_BROADCAST_VOLUME* pDisk = (DEV_BROADCAST_VOLUME*)dwData;
 			DWORD mask = pDisk->dbcv_unitmask;
 			TCHAR diskname[MAX_PATH];
 			int i = 0;
@@ -719,14 +725,13 @@ BOOL CUSB_ViewerDlg::OnDeviceChange(UINT nEventType, DWORD_PTR dwData)
 			if (i == 32)
 			{
 				AfxMessageBox(TEXT("无效的分区名称!"));
-			}
-			this->OnCbnSelchangeCombo1();
+			}*/
 			return TRUE;
 		}
 		case 0x8004:		//DBT_DEVICEREMOVECOMPLETE==0x8004
-			::AfxMessageBox(TEXT("卸载了设备"), 1, 0);
+			//::AfxMessageBox(TEXT("卸载了设备"), 1, 0);
 			this->GetUSB(this, IDC_COMBO1);
-			this->OnCbnSelchangeCombo1();
+			this->OnCbnSelchangeCombo1();		//更新列表框中 分区表 的显示
 			return TRUE;
 	}
 	return 0;

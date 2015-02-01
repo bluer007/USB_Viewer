@@ -30,7 +30,7 @@ private:
 	CComboBox* p_unit[4];
 	CButton* p_active[4];
 	CComboBox m_select_usb;
-
+	BOOL m_FormatState;
 /*
 	CComboBox m_file_system1;
 	CComboBox m_file_system2;
@@ -61,15 +61,19 @@ protected:
 public:
 	virtual BOOL OnInitDialog();
 
-afx_msg void OnCbnSelchangeSelectUsb();
-afx_msg void OnCbnDropdownSize1();
-afx_msg void OnCbnDropdownSize2();
-afx_msg void OnCbnDropdownSize3();
-afx_msg void OnCbnDropdownSize4();
-afx_msg void OnBnClickedActive1();
-afx_msg void OnBnClickedActive2();
-afx_msg void OnBnClickedActive3();
-afx_msg void OnBnClickedActive4();
-afx_msg void OnBnClickedCancel();
-afx_msg void OnBnClickedOk();
+protected:
+	afx_msg void OnCbnSelchangeSelectUsb();
+	afx_msg void OnCbnDropdownSize1();
+	afx_msg void OnCbnDropdownSize2();
+	afx_msg void OnCbnDropdownSize3();
+	afx_msg void OnCbnDropdownSize4();
+	afx_msg void OnBnClickedActive1();
+	afx_msg void OnBnClickedActive2();
+	afx_msg void OnBnClickedActive3();
+	afx_msg void OnBnClickedActive4();
+	afx_msg void OnBnClickedCancel();
+	afx_msg void OnBnClickedOk();
+
+	afx_msg LRESULT OnMymsg(WPARAM wParam, LPARAM lParam);		//对分区结果的接收
+	afx_msg BOOL OnDeviceChange(UINT nEventType, DWORD_PTR dwData);		//用户检测U盘的插入 拔出
 };
