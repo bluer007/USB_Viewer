@@ -120,8 +120,13 @@ void CCreateStartDlg::OnBnClickedOk()
 	else
 		ZeroMemory(this->m_UnZipArg, sizeof(*(this->m_UnZipArg)));
 	strcpy_s(this->m_UnZipArg->desPath, MAX_PATH, TEXT(str.GetBuffer()));
-	this->Partition(TEXT(str.GetBuffer()), sizeof(table)/sizeof(Partition_Table), table, 2,
-										this->GetSafeHwnd(), NULL);		
+	if (!this->Partition(TEXT(str.GetBuffer()), sizeof(table) / sizeof(Partition_Table), table, 2,
+		this->GetSafeHwnd(), NULL))
+	{
+		this->m_FormatState = FALSE;
+		this->m_needUnzip = FALSE;
+	}
+
 }
 
 #include <winioctl.h>
@@ -535,7 +540,7 @@ INT CCreateStartDlg::RestorePartitionBootSector(HANDLE *hDevice, INT num, DISK_G
 
 INT CCreateStartDlg::GetPartitionBootSector(UCHAR sector[], HANDLE *hDevice, INT partitionNum, DISK_GEOMETRY* diskGeometry)
 {
-	//partitionNum表示要获取的引导扇区是分区表第partitionNum个分区的, 设为 1,2, 3, 4
+	//partitionNum表示要获取的引导扇区是 分区表第partitionNum个分区的, 设为 1,2, 3, 4
 	if (partitionNum > 4 || partitionNum <= 0 || !hDevice || !diskGeometry || !sector)
 		return FALSE;
 
@@ -543,6 +548,18 @@ INT CCreateStartDlg::GetPartitionBootSector(UCHAR sector[], HANDLE *hDevice, INT
 	if (!(sector_size = this->GetDiskSector(sector, hDevice, NULL, NULL, diskGeometry)))
 		return FALSE;
 	
+	INT sector_type = this->CheckMbrPbr(sector, sector_size, NULL);
+	if (NO_MBR_PBR == sector_type)
+		return FALSE;
+	else if (PBR_NTFS == sector_type || PBR_FAT32 == sector_type)
+	{
+		if (1 == partitionNum)	//如果pbr是第一个扇区, 则肯定U盘只有一个分区,也就是第一个分区
+			return sector_size;
+		else
+			return FALSE;
+	}
+	
+	//下面的 即MBR == sector_type
 	DWORD sys_start_pos = 0;
 	memcpy_s(&sys_start_pos, 4, &sector[sector_size - 66 + 8 + (partitionNum - 1) * 16], 4);		//分区前预留扇区, 即分区开始扇区
 	if (sys_start_pos <= 0)		//对分区前预留扇区标志位做有效性检测
@@ -642,7 +659,7 @@ INT CCreateStartDlg::GetOnePartitionInfo(Partition_Table *list, HANDLE *hDevice,
 		else
 			partitionSize++;		//因为ntfs的 分区总共扇区 是算少了第一个引导扇区的 , 而fat32中是没有算少的
 
-		strcpy_s(list->type, sizeof(list->type), TEXT("ntfs"));
+		strcpy_s(list->type, sizeof(list->type), TEXT("NTFS"));
 		list->size = ULONG64((ULONG64)partitionSize * (ULONG64)diskGeometry->BytesPerSector / (1024.0 * 1024.0));
 	}
 	else if (FAT32 == type)
@@ -651,7 +668,7 @@ INT CCreateStartDlg::GetOnePartitionInfo(Partition_Table *list, HANDLE *hDevice,
 		if (partitionSize <= 0)
 			goto FINAL;
 
-		strcpy_s(list->type, sizeof(list->type), TEXT("fat32"));
+		strcpy_s(list->type, sizeof(list->type), TEXT("FAT32"));
 		list->size = ULONG64((ULONG64)partitionSize * (ULONG64)diskGeometry->BytesPerSector / (1024.0 * 1024.0));
 	}
 	else
@@ -1144,27 +1161,25 @@ afx_msg LRESULT CCreateStartDlg::OnGetResult(WPARAM wParam, LPARAM lParam)
 		if (FORMAT_OK == wParam)
 		{
 			AfxMessageBox("U盘分区成功");
-			this->m_FormatState = FALSE;
 		}
 		else if(FORMAT_ERROR == wParam)
 		{
 			AfxMessageBox("U盘分区失败");
-			this->m_FormatState = FALSE;
 		}
+		this->m_FormatState = FALSE;
 	}
 	
 	if (this->m_needUnzip)
 	{
 		if (UNZIP_OK == wParam)
 		{
-			AfxMessageBox("镜像写入完成");
-			this->m_needUnzip = FALSE;
+			AfxMessageBox("镜像写入完成--恭喜, 大功告成!");
 		}
 		else if (UNZIP_ERROR == wParam)
 		{
 			AfxMessageBox("镜像写入失败");
-			this->m_needUnzip = FALSE;
 		}
+		this->m_needUnzip = FALSE;
 	}
 
 	return 0;
@@ -1748,7 +1763,7 @@ INT CCreateStartDlg::CheckMbrPbr(UCHAR sector[], INT sector_size, Partition_Tabl
 			else
 				partitionSize++;		//因为ntfs的 分区总共扇区 是算少了第一个引导扇区的 , 而fat32中是没有算少的
 
-			strcpy_s(list->type, sizeof(list->type), TEXT("ntfs"));
+			strcpy_s(list->type, sizeof(list->type), TEXT("NTFS"));
 			list->size = ULONG64((ULONG64)partitionSize * (ULONG64)sector_size / (1024.0 * 1024.0));
 			//没有diskGeometry->BytesPerSector, 就用sector_size代替
 		}
@@ -1758,13 +1773,12 @@ INT CCreateStartDlg::CheckMbrPbr(UCHAR sector[], INT sector_size, Partition_Tabl
 			if (partitionSize <= 0)
 				return type = NO_MBR_PBR;
 
-			strcpy_s(list->type, sizeof(list->type), TEXT("fat32"));
+			strcpy_s(list->type, sizeof(list->type), TEXT("FAT32"));
 			list->size = ULONG64((ULONG64)partitionSize * (ULONG64)sector_size / (1024.0 * 1024.0));
 			//没有diskGeometry->BytesPerSector, 就用sector_size代替
 		}
 		else
 			return type = NO_MBR_PBR;
 	}
-	else
-		return type;	//可能是PBR_FAT32 或者 PBR_NTFS
+	return type;	//可能是PBR_FAT32 或者 PBR_NTFS
 }

@@ -41,7 +41,8 @@ protected:
 	afx_msg HCURSOR OnQueryDragIcon();
 	afx_msg BOOL OnDeviceChange(UINT nEventType, DWORD_PTR dwData);
 
-	afx_msg void OnCbnSelchangeCombo1();
+
+	void OnCbnSelchangeCombo1();
 	afx_msg void OnCeatestart();
 	afx_msg void OnExit();
 

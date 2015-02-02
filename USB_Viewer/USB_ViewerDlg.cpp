@@ -575,6 +575,7 @@ INT CUSB_ViewerDlg::GetUSB(CDialogEx* dialog, INT ID)
 	return num;
 }
 
+
 //每当选择的U盘改变时候, 自动更新 U盘的 分区表显示
 void CUSB_ViewerDlg::OnCbnSelchangeCombo1()
 {
@@ -583,117 +584,54 @@ void CUSB_ViewerDlg::OnCbnSelchangeCombo1()
 	CListCtrl *m_ListCtrl = ((CListCtrl*)GetDlgItem(IDC_LIST2));
 	CComboBox *m_CComboBox = ((CComboBox*)GetDlgItem(IDC_COMBO1));
 	m_ListCtrl->DeleteAllItems();	//清楚所有列表项
-	
+
 	m_CComboBox->GetWindowText(str);
 	INT pos = str.Find(":\\");	//因为U盘的显示格式是"G:\ 16G"
 	if (pos == -1)return;	//针对  空白的选项 和 找不到U盘 情况
 	str = str.Mid(pos - 1, 2);		//现在str表示"G:"
 
+	CCreateStartDlg m_CCreateStartDlg;
+	UCHAR* m_sector = NULL;
+	HANDLE hDrv = INVALID_HANDLE_VALUE;
+	if (!m_CCreateStartDlg.GetDiskHandle(str.GetBuffer(), NULL, &hDrv))
+		goto FINAL;
 
-	str = "\\\\.\\" + str;
-	HANDLE hDrv = CreateFile(str, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-	if (INVALID_HANDLE_VALUE == hDrv)
-		goto ERROR1;
-	
-	VOLUME_DISK_EXTENTS vde;
-	DWORD dwBytes = 0;
-	BOOL isOK = DeviceIoControl(hDrv, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, NULL, 0, &vde, sizeof(VOLUME_DISK_EXTENTS), &dwBytes, NULL);
-	if (!isOK)
-		goto ERROR2;
+	Partition_Table list[4] = { 0 };
+	INT num = 0;
+	if (!(num = this->GetUSBInfo(&list, &hDrv, NULL, NULL)))
+		goto FINAL;
 
-	str.Format("\\\\.\\PhysicalDrive%d", INT(vde.Extents->DiskNumber));
-	CloseHandle(hDrv);
-	hDrv = CreateFile(str, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_WRITE | FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-	if (INVALID_HANDLE_VALUE == hDrv)
-		goto ERROR1;
-
-	DISK_GEOMETRY diskGeometry;
-	//
-	// 获得磁盘结构信息
-	//
-	if (DeviceIoControl(hDrv,
-		IOCTL_DISK_GET_DRIVE_GEOMETRY,    // 调用了CTL_CODE macro宏
-		NULL,
-		0,
-		&diskGeometry,
-		sizeof(DISK_GEOMETRY),
-		&dwBytes,
-		NULL))
+	int nIndex;
+	CHAR strSize[20] = { 0 };
+	for (int i = 0; i < num; i++)
 	{
-
-		DWORD dwSize = diskGeometry.BytesPerSector;    // 每sector扇区字节数
-		UCHAR *sector = new UCHAR[dwSize]{ 0 };
-		if (sector)
-		{
-			ReadFile(hDrv, sector, dwSize, &dwBytes, NULL);
-			if (dwBytes == dwSize)
-			{
-				//分区表有效性检测
-				if (sector[dwBytes - 2] != 0x55 || sector[dwBytes - 1] != 0xAA)		//	判断魔数55 AA
-					goto ERROR2;
-				if (sector[dwBytes - 18] != 0x00 && sector[dwBytes - 18] != 0x80)	//下面分别判断是否为00非活动分区   80活动分区
-					goto ERROR2;
-				if (sector[dwBytes - 34] != 0x00 && sector[dwBytes - 34] != 0x80)
-					goto ERROR2;
-				if (sector[dwBytes - 50] != 0x00 && sector[dwBytes - 50] != 0x80)
-					goto ERROR2;
-				if (sector[dwBytes - 66] != 0x00 && sector[dwBytes - 66] != 0x80)
-					goto ERROR2;
-
-				if (sector[dwBytes - 18 + 4] == 0x05				//判断分区是否为05  扩展分区
-					|| sector[dwBytes - 34 + 4] == 0x05
-					|| sector[dwBytes - 50 + 4] == 0x05
-					|| sector[dwBytes - 66 + 4] == 0x05)	
-				{
-					AfxMessageBox("提醒: 暂时不支持含有 扩展分区(逻辑分区) 的U盘,\n         建议重新格式化U盘");
-					goto ERROR2;
-				}
-
-				Partition_Table list[4] = {0};
-				INT num = 0;
-				if (!(num = this->GetUSBInfo(&list, &hDrv, NULL, NULL)))
-					goto ERROR2;
-							
-				int nIndex;
-				CHAR strSize[20] = {0};
-				for (int i = 0; i < num; i++)
-				{
-					if (list[i].size < 1000)
-						sprintf_s(strSize, sizeof(strSize), "(%d)  %dM", i + 1, list[i].size);
-					else
-						sprintf_s(strSize, sizeof(strSize),"(%d)  %.1fG", i+1, list[i].size / 1024.0);
-					nIndex = m_ListCtrl->InsertItem(i, strSize);
-					if (nIndex < 0) 
-						goto ERROR2; 
-
-					m_ListCtrl->SetItemText(nIndex, 1, _T(list[i].type));
-				}
-
-				CloseHandle(hDrv);
-				((CButton*)GetDlgItem(IDOK))->EnableWindow(TRUE);
-			}
-			else
-				goto ERROR2;
-		}
+		if (list[i].size < 1000)
+			sprintf_s(strSize, sizeof(strSize), "(%d)  %dM", i + 1, list[i].size);
 		else
-			goto ERROR2;
+			sprintf_s(strSize, sizeof(strSize), "(%d)  %.1fG", i + 1, list[i].size / 1024.0);
+		nIndex = m_ListCtrl->InsertItem(i, strSize);
+		if (nIndex < 0)
+			goto FINAL;
 
+		m_ListCtrl->SetItemText(nIndex, 1, _T(list[i].type));
 	}
-	else
-		goto ERROR2;
 
-
+	CloseHandle(hDrv);
+	((CButton*)GetDlgItem(IDOK))->EnableWindow(TRUE);
 	return;
 
-ERROR2:
-	CloseHandle(hDrv);
-ERROR1:
+
+FINAL:
+	if (hDrv != INVALID_HANDLE_VALUE)
+		CloseHandle(hDrv);
+
 	m_CComboBox->GetWindowText(str);
 	str.Format("读取(%s)U盘错误", str);
 	m_ListCtrl->DeleteAllItems();	//清楚所有列表项
 	m_ListCtrl->InsertItem(0, _T(str));
 	return;
 }
+
 
 #include <Dbt.h>
 //检测设备变动, 并更新界面
@@ -1207,9 +1145,10 @@ void CUSB_ViewerDlg::OnExit()
 	exit(0);
 }
 
+
 INT CUSB_ViewerDlg::GetUSBInfo(
-	Partition_Table (*list)[4],
-/*
+	Partition_Table(*list)[4],
+	/*
 	UCHAR sector[] / *= NULL* /,
 	INT sectorSize/ * = 0* /,*/
 	HANDLE *hDevice /*= NULL*/,
@@ -1225,6 +1164,7 @@ INT CUSB_ViewerDlg::GetUSBInfo(
 	HANDLE m_hDevice = INVALID_HANDLE_VALUE;
 	DISK_GEOMETRY diskGeometry;
 	CCreateStartDlg m_CreateStartDlg;
+	Partition_Table m_list = { 0 };
 
 	if (hDevice && hDevice != INVALID_HANDLE_VALUE)
 	{
@@ -1244,36 +1184,32 @@ INT CUSB_ViewerDlg::GetUSBInfo(
 	if (!(m_sectorSize = m_CreateStartDlg.GetDiskSector(m_sector, &m_hDevice, NULL, NULL, &diskGeometry)))
 		goto FINAL;
 
-	if (m_sector[m_sectorSize - 2] != 0x55 
-		|| m_sector[m_sectorSize - 1] != 0xAA)
-		goto FINAL;			//最基本的 有效mbr扇区后两位必须是 55aa , 如果不符合说明mbr扇区无效
-
-	UCHAR type = 0, active = 0;
-	INT size = 0, num = 0;
-	Partition_Table m_list;// = { 0 };
-	for (int i = 0; i < 4; i++)
+	INT type = m_CreateStartDlg.CheckMbrPbr(m_sector, m_sectorSize, &m_list);
+	if (NO_MBR_PBR == type)
+		goto FINAL;
+	else if (PBR_FAT32 == type || PBR_NTFS == type)
 	{
-		active = m_sector[m_sectorSize - 66 + i * 16];		//分区  活动 标志位
-		if(0x80 != active && 0x00 != active)		//不等于80, 00 说明 不是有效分区表项
-			continue;
-
-		type = m_sector[m_sectorSize - 62 + i * 16];		//// -62 == -66 + 4		文件系统标志位
-		
-		if (0x07 != type && 0x0C != type && 0x0B != type)	//用作分区表表项有效性检测, 当!=0x07等, 说明该表项无效
-			continue;
-
-		//一定程度上做分区有效性检测, 如:无效的分区前预留扇区标志位, 无效的分区引导扇区等, 则continue
-		if (!m_CreateStartDlg.GetOnePartitionInfo(&m_list, &m_hDevice, i + 1, &diskGeometry))
-			continue;
-
-		//经过多重检测, 则表示有效, 故赋值
-		memcpy_s(&(*list)[num], sizeof((*list)[num]), &m_list, sizeof(m_list));
-
-		num++;
+		memcpy_s(&(*list)[0], sizeof((*list)[0]), &m_list, sizeof(m_list));
+		res = 1;	//即只找到一个分区
+		goto FINAL;
 	}
+	else if (MBR == type)
+	{
+		INT num = 0;
+		for (int i = 0; i < 4; i++)
+		{
+			if (!m_CreateStartDlg.GetOnePartitionInfo(&m_list, &m_hDevice, i + 1, &diskGeometry))
+				continue;
 
-	res = (num <= 0 ? FALSE : num);
-	goto FINAL;
+			//经过多重检测, 则表示有效, 故赋值
+			memcpy_s(&(*list)[num], sizeof((*list)[num]), &m_list, sizeof(m_list));
+			num++;
+		}
+		res = num;
+		goto FINAL;
+	}
+	else
+		goto FINAL;
 
 
 FINAL:
@@ -1284,6 +1220,7 @@ FINAL:
 
 	return res;
 }
+
 
 void CUSB_ViewerDlg::OnClickList2(NMHDR *pNMHDR, LRESULT *pResult)
 {
