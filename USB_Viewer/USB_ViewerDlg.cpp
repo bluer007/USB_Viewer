@@ -250,7 +250,7 @@ BOOL CUSB_ViewerDlg::OnInitDialog()
 
 	//控件内容初始化
 	((CButton*)GetDlgItem(IDOK))->EnableWindow(FALSE);
-	this->GetUSB(this, IDC_COMBO1);		//搜索并显示U盘盘符
+	this->GetUSB(this, IDC_COMBO1);		// 获取当前所有U盘设备,并显示到组合框中
 	this->OnCbnSelchangeCombo1();		//更新列表框中 分区表 的显示
 
 	//m_wndPath->SetRedraw(FALSE);//防止重绘
@@ -575,7 +575,7 @@ INT CUSB_ViewerDlg::GetUSB(CDialogEx* dialog, INT ID)
 	return num;
 }
 
-//每当选择的U盘改变时候, 自动更新U盘的分区表显示
+//每当选择的U盘改变时候, 自动更新 U盘的 分区表显示
 void CUSB_ViewerDlg::OnCbnSelchangeCombo1()
 {
 	CString str;
@@ -586,7 +586,7 @@ void CUSB_ViewerDlg::OnCbnSelchangeCombo1()
 	
 	m_CComboBox->GetWindowText(str);
 	INT pos = str.Find(":\\");	//因为U盘的显示格式是"G:\ 16G"
-	if (pos == -1)return;	//针对  空白的选项
+	if (pos == -1)return;	//针对  空白的选项 和 找不到U盘 情况
 	str = str.Mid(pos - 1, 2);		//现在str表示"G:"
 
 
@@ -1244,18 +1244,26 @@ INT CUSB_ViewerDlg::GetUSBInfo(
 	if (!(m_sectorSize = m_CreateStartDlg.GetDiskSector(m_sector, &m_hDevice, NULL, NULL, &diskGeometry)))
 		goto FINAL;
 
-	UCHAR type = 0;
+	if (m_sector[m_sectorSize - 2] != 0x55 
+		|| m_sector[m_sectorSize - 1] != 0xAA)
+		goto FINAL;			//最基本的 有效mbr扇区后两位必须是 55aa , 如果不符合说明mbr扇区无效
+
+	UCHAR type = 0, active = 0;
 	INT size = 0, num = 0;
 	Partition_Table m_list;// = { 0 };
 	for (int i = 0; i < 4; i++)
 	{
+		active = m_sector[m_sectorSize - 66 + i * 16];		//分区  活动 标志位
+		if(0x80 != active && 0x00 != active)		//不等于80, 00 说明 不是有效分区表项
+			continue;
+
 		type = m_sector[m_sectorSize - 62 + i * 16];		//// -62 == -66 + 4		文件系统标志位
 		
 		if (0x07 != type && 0x0C != type && 0x0B != type)	//用作分区表表项有效性检测, 当!=0x07等, 说明该表项无效
 			continue;
 
 		//一定程度上做分区有效性检测, 如:无效的分区前预留扇区标志位, 无效的分区引导扇区等, 则continue
-		if (!m_CreateStartDlg.GetOnePartitionInfo(&m_list, &m_hDevice, num + 1, &diskGeometry))
+		if (!m_CreateStartDlg.GetOnePartitionInfo(&m_list, &m_hDevice, i + 1, &diskGeometry))
 			continue;
 
 		//经过多重检测, 则表示有效, 故赋值

@@ -43,7 +43,7 @@ BOOL CCreateStartDlg::OnInitDialog()
 	CDialogEx::OnInitDialog();
 
 	// TODO:  在此添加额外的初始化代码
-	this->m_USB_ViewerDlg->GetUSB(this, IDC_COMBO1);
+	this->m_USB_ViewerDlg->GetUSB(this, IDC_COMBO1);			//在组合框上显示所找到的U盘
 	((CButton*)this->GetDlgItem(IDC_RADIO1))->SetCheck(TRUE);		//单选框 设置为 推荐选项--格式化再做启动盘
 
 
@@ -598,7 +598,7 @@ INT CCreateStartDlg::GetDiskSector(UCHAR sector[], HANDLE *hDevice, LPCSTR drive
 
 INT CCreateStartDlg::GetOnePartitionInfo(Partition_Table *list, HANDLE *hDevice, INT partitionNum, DISK_GEOMETRY* diskGeometry)
 {
-	//partitionNum为第几个分区, 如1, 2,3 4
+	//partitionNum为 分区表第几项 第, 即第几个分区, 如1, 2,3 4
 	if (!list || !hDevice || partitionNum > 4 || partitionNum <= 0 || !diskGeometry)
 		return FALSE;
 
@@ -1691,4 +1691,80 @@ BOOL CCreateStartDlg::OnDeviceChange(UINT nEventType, DWORD_PTR dwData)
 	}
 	}
 	return 0;
+}
+
+INT CCreateStartDlg::CheckMbrPbr(UCHAR sector[], INT sector_size, Partition_Table* list /*= NULL*/)
+{
+	INT type = NO_MBR_PBR;
+	
+	//检查魔数 55AA
+	if (sector[sector_size - 2] != 0x55
+		|| sector[sector_size - 1] != 0xAA)
+		return NO_MBR_PBR;
+
+	//检验是否为mbr
+	BOOL isMBR = TRUE;
+	for (int i = 0; i < 4; i++)
+	{
+		//检查活动分区标志位
+		if (sector[sector_size - 66 + i * 16] != 0x80
+			&& sector[sector_size - 66 + i * 16] != 0x00)
+		{
+			isMBR = FALSE;
+			break;
+		}
+	}
+	if (isMBR)
+		return type = MBR;
+
+	//检查是否为NTFS_PBR
+	CHAR name[6] = { 0 };
+	memcpy_s(name, sizeof(name), &sector[3], 4);		//sector[3,4,5,6]是NTFS的File system ID ("NTFS")
+	//判断分区的文件系统
+	if (strcmp(name, TEXT("NTFS")) == 0)
+	{
+		type = PBR_NTFS;
+	}
+	else
+	{
+		//检查是否为FAT32_PBR
+		ZeroMemory(name, sizeof(name));
+		memcpy_s(name, sizeof(name), &sector[82], 5);		//sector[82,83,84,85,86]是FAT32的File system标志位("FAT32")
+		if (strcmp(name, TEXT("FAT32")) == 0)
+			type = PBR_FAT32;
+		else
+			return type = NO_MBR_PBR;
+	}
+
+	//如果有需要则, 设置分区的  文件系统type 和 大小size 参数
+	if (!list)
+	{
+		DWORD partitionSize = 0;
+		if (PBR_NTFS == type)
+		{
+			memcpy_s(&partitionSize, sizeof(DWORD), &sector[40], 4);		//ntfs引导扇区中 分区总共扇区 标志位
+			if (partitionSize <= 0)
+				return type = NO_MBR_PBR;
+			else
+				partitionSize++;		//因为ntfs的 分区总共扇区 是算少了第一个引导扇区的 , 而fat32中是没有算少的
+
+			strcpy_s(list->type, sizeof(list->type), TEXT("ntfs"));
+			list->size = ULONG64((ULONG64)partitionSize * (ULONG64)sector_size / (1024.0 * 1024.0));
+			//没有diskGeometry->BytesPerSector, 就用sector_size代替
+		}
+		else if (PBR_FAT32 == type)
+		{
+			memcpy_s(&partitionSize, sizeof(DWORD), &sector[32], 4);		//fat32引导扇区中 分区总共扇区 标志位	Sectors (on large volumes)
+			if (partitionSize <= 0)
+				return type = NO_MBR_PBR;
+
+			strcpy_s(list->type, sizeof(list->type), TEXT("fat32"));
+			list->size = ULONG64((ULONG64)partitionSize * (ULONG64)sector_size / (1024.0 * 1024.0));
+			//没有diskGeometry->BytesPerSector, 就用sector_size代替
+		}
+		else
+			return type = NO_MBR_PBR;
+	}
+	else
+		return type;	//可能是PBR_FAT32 或者 PBR_NTFS
 }

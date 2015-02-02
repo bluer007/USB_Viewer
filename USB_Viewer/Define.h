@@ -10,6 +10,11 @@ enum
 	UNZIP_OK,
 	UNZIP_ERROR,
 
+	NO_MBR_PBR,
+	MBR,
+	PBR_NTFS,
+	PBR_FAT32,
+
 	NO_Active_Partition,		//用于CCreateStartDlg::GetActivePartitionNum()函数, 表示找不到活动分区
 };
 
@@ -39,3 +44,4 @@ struct UnZipArg
 	CHAR isoPath[MAX_PATH];
 	HWND msgWnd;
 };
+
