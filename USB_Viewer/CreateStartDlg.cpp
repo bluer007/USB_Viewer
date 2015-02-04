@@ -74,10 +74,11 @@ void CCreateStartDlg::OnBnClickedOk()
 
 	CHAR m_isoPath[MAX_PATH] = {0};	
 	GetCurrentDirectory(MAX_PATH, m_isoPath);		//如E:\Projects\test\test
-	strcat_s(m_isoPath, MAX_PATH, "\\Data\\CA.iso");		//iso路径
+	strcat_s(m_isoPath, MAX_PATH, TEXT("\\Data\\CA.iso"));		//iso路径
 	HANDLE hfile = CreateFile(TEXT(m_isoPath), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
 	if (INVALID_HANDLE_VALUE == hfile)
 	{
+		CloseHandle(hfile);
 		AfxMessageBox(TEXT("找不到镜像文件, 不能写入 T_T"));
 		return;
 	}
@@ -87,46 +88,188 @@ void CCreateStartDlg::OnBnClickedOk()
 	LARGE_INTEGER usbSize = this->GetUSBAllSize(TEXT(str.GetBuffer()));		//获得u盘的总大小, 字节Byte做单位
 	if (!fileSize.QuadPart || !usbSize.QuadPart)
 	{
+		CloseHandle(hfile);
 		AfxMessageBox(TEXT("镜像文件 大小 或 U盘容量 异常"));
 		return;
 	}
-	else if (fileSize.QuadPart >= usbSize.QuadPart)
+	
+	
+	//根据 选择 的 不同制作启动盘, 进行相应的判断
+	if (((CButton*)this->GetDlgItem(IDC_RADIO1))->GetCheck())		//单选框 设置为 推荐选项--格式化再做启动盘
 	{
-		AfxMessageBox(TEXT("U盘容量不足, 不够写入镜像文件咧"));
+		if (fileSize.QuadPart >= usbSize.QuadPart)
+		{
+			CloseHandle(hfile);
+			AfxMessageBox(TEXT("U盘容量不足, 不够写入镜像文件咧"));
+			return;
+		}
+
+		fileSize.QuadPart = (fileSize.QuadPart / (1024 * 1024)) + 1;	//将iso文件大小转换为MB, +1是保险起见
+
+		LARGE_INTEGER fat32size, ntfsSize;			//分别表示fat32, ntfs分区的大小
+		if (fileSize.QuadPart >= FAT32_SIZE_LIMIT)
+			fat32size.QuadPart = fileSize.QuadPart + 25;	//保险起见, 分配比iso文件大25M的fat32分区
+		else
+			fat32size.QuadPart = FAT32_SIZE_LIMIT + 5;		//iso低于fat32最低大小要求, 就分配最低大小+5的大小
+
+		usbSize.QuadPart = (usbSize.QuadPart / (1024 * 1024)) + 1;	//将U盘总大小转换为MB, +1是保险起见
+		ntfsSize.QuadPart = usbSize.QuadPart - fat32size.QuadPart;		//剩下的U盘容量分配给ntfs分区
+		Partition_Table table[] =
+		{
+			{ "ntfs", (ULONG64)ntfsSize.QuadPart },//{"ntfs", 1024 },		//1024MB == 2097152扇区	2097152
+			{ "fat32", (ULONG64)fat32size.QuadPart },		//2097152mb == 4194304	4194304			ntfs	fat32
+															//{"ntfs", 400 },		//1024	2048	3072	4096
+															//{"ntfs", 2048 }
+		};
+		this->m_FormatState = TRUE;
+		this->m_needUnzip = TRUE;
+		if (!this->m_UnZipArg)
+			this->m_UnZipArg = new UnZipArg();
+		else
+			ZeroMemory(this->m_UnZipArg, sizeof(*(this->m_UnZipArg)));
+		strcpy_s(this->m_UnZipArg->desPath, MAX_PATH, TEXT(str.GetBuffer()));
+		if (!this->Partition(TEXT(str.GetBuffer()), sizeof(table) / sizeof(Partition_Table), table, 2,
+			this->GetSafeHwnd(), NULL))
+		{
+			this->m_FormatState = FALSE;
+			this->m_needUnzip = FALSE;
+		}
+
+
+	}
+	else if (((CButton*)this->GetDlgItem(IDC_RADIO2))->GetCheck())		//单选框 设置为 直接做启动盘(不格式化)
+	{
+		HANDLE hDevice = INVALID_HANDLE_VALUE;
+		DISK_GEOMETRY diskGeometry;
+		if (!this->GetDiskHandle(str.GetBuffer(), NULL, &hDevice))
+		{
+			CloseHandle(hfile);
+			//对于U盘第一个扇区就是pbr的分区, 是不能做成启动盘的
+			AfxMessageBox(TEXT("很遗憾, 读取U盘操作失败了T_T\n建议 选择 推荐选项--格式化再做启动盘"));
+			return;
+		}
+		if (!this->GetDiskGeometry(&hDevice, NULL, NULL, &diskGeometry))
+		{
+			CloseHandle(hDevice);
+			CloseHandle(hfile);
+			//对于U盘第一个扇区就是pbr的分区, 是不能做成启动盘的
+			AfxMessageBox(TEXT("很遗憾, 读取U盘操作失败了T_T\n建议 选择 推荐选项--格式化再做启动盘"));
+			return;
+		}
+
+		INT sector_type = this->CheckMbrPbr(NULL, 0, NULL, &hDevice, NULL, NULL);
+		if (PBR_FAT32 == sector_type || PBR_NTFS == sector_type)
+		{
+			CloseHandle(hDevice);
+			CloseHandle(hfile);
+			//对于U盘第一个扇区就是pbr的分区, 是不能做成启动盘的
+			AfxMessageBox(TEXT("很遗憾, U盘不符合 保留数据制作启动盘 条件T_T\n建议 选择 推荐选项--格式化再做启动盘"));
+			return;
+		}
+		else if(FALSE == sector_type)
+		{
+			CloseHandle(hDevice);
+			CloseHandle(hfile);
+			AfxMessageBox(TEXT("很遗憾, 读取U盘信息出错了"));
+			return;
+		}
+		//即 MBR == sector_type
+		//既然符合制作启动盘条件, 则检查可用空间是否足够
+		unsigned __int64 i64FreeBytesToCaller = 0;
+		unsigned __int64 i64TotalBytes = 0;
+
+		GetDiskFreeSpaceEx(TEXT(str.GetBuffer()),
+			(PULARGE_INTEGER)&i64FreeBytesToCaller,
+			(PULARGE_INTEGER)&i64TotalBytes,
+			NULL);
+		//都是用  字节 做单位      10MB==10485760.0字节  让可用空间比镜像大小>10M, 保险点
+		if (unsigned __int64(fileSize.QuadPart + (LONGLONG)10485760.0) >= i64FreeBytesToCaller)
+		{
+			CloseHandle(hDevice);
+			CloseHandle(hfile);
+			AfxMessageBox(TEXT("呵呵, 你的U盘的 可用空间 不足哦~~\n建议, 选择格式化制作U盘, 或者请先清出足够空间再继续^_^"));
+			return;
+		}
+
+		//开始制作启动盘, 不格式化
+		if (!this->m_needUnzip)
+		{
+			this->m_needUnzip = TRUE;
+			this->m_FormatState = FALSE;
+			//设置 分区表第一个有效项 为活动分区
+			INT res_active = this->SetActivePartitionNum(5, &hDevice, NULL, NULL);
+			if (-1 == res_active)
+			{
+				CloseHandle(hDevice);
+				CloseHandle(hfile);
+				AfxMessageBox(TEXT("很遗憾, U盘的分区是 不支持制作启动盘 的 扩展分区\n建议 选择 推荐选项--格式化再做启动盘"));
+				this->m_needUnzip = FALSE;
+				return;
+			}
+			else if(FALSE == res_active)
+			{
+				CloseHandle(hDevice);
+				CloseHandle(hfile);
+				AfxMessageBox(TEXT("很遗憾, 设置活动分区出错了T_T"));
+				this->m_needUnzip = FALSE;
+				return;
+			}
+			
+			//开始写入mbr,pbr,镜像文件
+			//AfxMessageBox("即将安装活动分区的mbr和 pbr扇区");
+			if (!this->InstallMBR(&hDevice, NULL, NULL, &diskGeometry))		//安装MBR扇区
+			{
+				CloseHandle(hDevice);
+				CloseHandle(hfile);
+				AfxMessageBox(TEXT("很遗憾, 安装MBR扇区出错了T_T"));
+				this->m_needUnzip = FALSE;
+				return;
+			}
+			if (!this->InstallPBR(NULL, str.GetBuffer(), NULL, TRUE,&diskGeometry))		//安装活动分区的pbr扇区
+			{
+				CloseHandle(hDevice);
+				CloseHandle(hfile);
+				AfxMessageBox(TEXT("很遗憾, 安装PBR扇区出错了T_T"));
+				this->m_needUnzip = FALSE;
+				return;
+			}
+			
+			//填写 写入镜像的  参数
+			if (!this->m_UnZipArg)
+				this->m_UnZipArg = new UnZipArg();
+			else
+				ZeroMemory(this->m_UnZipArg, sizeof(*(this->m_UnZipArg)));
+			strcpy_s(this->m_UnZipArg->desPath, MAX_PATH, TEXT(str.GetBuffer()));
+
+			if (!this->StartUnZip())	//开始写入镜像
+			{
+				CloseHandle(hDevice);
+				CloseHandle(hfile);
+				AfxMessageBox(TEXT("很遗憾, 写入镜像出错了T_T"));
+				this->m_needUnzip = FALSE;
+				return;
+			}
+
+			//执行到这里 表示,都成功, 故清理工作
+			CloseHandle(hDevice);
+			CloseHandle(hfile);
+			return;
+		}
+		else
+		{
+			CloseHandle(hDevice);
+			CloseHandle(hfile);
+			AfxMessageBox(TEXT("写入U盘ing咧, 请稍后哈~"));
+			return;
+		}
+
+	}
+	else
+	{
+		CloseHandle(hfile);
+		AfxMessageBox(TEXT("请选择 制作启动盘的方式 哈^_^"));		//即选择单选框
 		return;
 	}
-
-	fileSize.QuadPart = (fileSize.QuadPart / (1024 * 1024)) + 1;	//将iso文件大小转换为MB, +1是保险起见
-
-	LARGE_INTEGER fat32size, ntfsSize;			//分别表示fat32, ntfs分区的大小
-	if (fileSize.QuadPart >= FAT32_SIZE_LIMIT)
-		fat32size.QuadPart = fileSize.QuadPart + 25;	//保险起见, 分配比iso文件大25M的fat32分区
-	else
-		fat32size.QuadPart = FAT32_SIZE_LIMIT + 5;		//iso低于fat32最低大小要求, 就分配最低大小+5的大小
-
-	usbSize.QuadPart = (usbSize.QuadPart / (1024 * 1024)) + 1;	//将U盘总大小转换为MB, +1是保险起见
-	ntfsSize.QuadPart = usbSize.QuadPart - fat32size.QuadPart;		//剩下的U盘容量分配给ntfs分区
-	Partition_Table table[] = 
-	{
-		{ "ntfs", (ULONG64)ntfsSize.QuadPart },//{"ntfs", 1024 },		//1024MB == 2097152扇区	2097152
-		{"fat32", (ULONG64)fat32size.QuadPart },		//2097152mb == 4194304	4194304			ntfs	fat32
-		//{"ntfs", 400 },		//1024	2048	3072	4096
-		//{"ntfs", 2048 }
-	};
-	this->m_FormatState = TRUE;
-	this->m_needUnzip = TRUE;
-	if (!this->m_UnZipArg)
-		this->m_UnZipArg = new UnZipArg();
-	else
-		ZeroMemory(this->m_UnZipArg, sizeof(*(this->m_UnZipArg)));
-	strcpy_s(this->m_UnZipArg->desPath, MAX_PATH, TEXT(str.GetBuffer()));
-	if (!this->Partition(TEXT(str.GetBuffer()), sizeof(table) / sizeof(Partition_Table), table, 2,
-		this->GetSafeHwnd(), NULL))
-	{
-		this->m_FormatState = FALSE;
-		this->m_needUnzip = FALSE;
-	}
-
 }
 
 #include <winioctl.h>
@@ -366,7 +509,7 @@ INT __stdcall CCreateStartDlg::FormatPartition()
 		AfxMessageBox("即将安装活动分区的mbr和 pbr扇区");
 		if (!this->InstallMBR(&m_hDrv, NULL, NULL, &m_diskGeometry))		//安装MBR扇区
 			goto ERROR2;
-		if (!this->InstallPBR(&m_hDrv, NULL, NULL, &m_diskGeometry))		//安装活动分区的pbr扇区
+		if (!this->InstallPBR(&m_hDrv, NULL, NULL, FALSE, &m_diskGeometry))		//安装活动分区的pbr扇区
 			goto ERROR2;
 		if (!this->UpdateDisk(&m_hDrv, NULL, NULL))
 			goto ERROR2;
@@ -568,7 +711,7 @@ INT CCreateStartDlg::GetPartitionBootSector(UCHAR sector[], HANDLE *hDevice, INT
 	LARGE_INTEGER offset;
 	DWORD dwBytes = 0;
 	offset.QuadPart = (ULONG64)sys_start_pos * (ULONG64)diskGeometry->BytesPerSector;		// 有符号的64位整型表示 
-	DWORD aa = SetFilePointer(*hDevice, offset.LowPart, &offset.HighPart, FILE_BEGIN);
+	SetFilePointer(*hDevice, offset.LowPart, &offset.HighPart, FILE_BEGIN);
 	ReadFile(*hDevice, sector, diskGeometry->BytesPerSector, &dwBytes, NULL);		//读取活动分区第一个引导扇区
 	if (dwBytes == diskGeometry->BytesPerSector)
 	{
@@ -685,6 +828,7 @@ FINAL:
 
 INT CCreateStartDlg::GetActivePartitionNum(HANDLE *hDevice, LPCSTR drive, LPCSTR disk)
 {
+	//返回值 表示 U盘分区表上第几个项 为活动分区,如1,2,3,4,   NO_Active_Partition表示没有活动分区    FALSE表出错
 	HANDLE m_hDevice = INVALID_HANDLE_VALUE;
 	UCHAR* sector = NULL;
 	INT res = FALSE;
@@ -722,6 +866,125 @@ INT CCreateStartDlg::GetActivePartitionNum(HANDLE *hDevice, LPCSTR drive, LPCSTR
 		res = m_ActivePartitionNum;
 		goto FINAL;		//找不到活动分区
 	}
+
+FINAL:
+	if (sector)
+		delete[] sector;
+	if (!hDevice)
+		CloseHandle(m_hDevice);
+	return res;
+}
+
+INT CCreateStartDlg::SetActivePartitionNum(INT activePartitionNum, HANDLE *hDevice, LPCSTR drive, LPCSTR disk)
+{
+	//activePartitionNum 表示 设置U盘分区表上第几个项 为活动分区,
+	//如1,2,3,4,   0表示不设活动分区,  5表示将分区表的第一个 有效主分区项 (不一定排第一项)设为活动分区
+	//返回值FALSE表出错, -1表要设置的activePartitionNum对应的分区是扩展分区, TRUE表成功设置(就算activePartitionNum == 0)
+	if (activePartitionNum < 0 && activePartitionNum > 5)
+		return FALSE;
+
+	INT m_activePartitionNum = activePartitionNum;
+	HANDLE m_hDevice = INVALID_HANDLE_VALUE;
+	UCHAR* sector = NULL;
+	INT res = FALSE;
+	if (hDevice)
+	{
+		m_hDevice = *hDevice;
+	}
+	else if (!this->GetDiskHandle(drive, disk, &m_hDevice))
+	{
+		return FALSE;
+	}
+
+	DISK_GEOMETRY diskGeometry = { 0 };
+	if (!this->GetDiskGeometry(&m_hDevice, NULL, NULL, &diskGeometry))
+		goto FINAL;
+
+	sector = new UCHAR[diskGeometry.BytesPerSector]();
+	INT sector_size = 0;
+	if (!(sector_size = this->GetDiskSector(sector, &m_hDevice, NULL, NULL, &diskGeometry)))
+		goto FINAL;
+
+	//只有存在MBR扇区的U盘才可以设置活动分区
+	if (MBR != this->CheckMbrPbr(sector, sector_size, NULL, NULL, NULL, NULL))
+		goto FINAL;
+
+	if (5 == activePartitionNum)
+	{
+		BOOL isFindMain = FALSE;	//是否找到有效主分区
+		BOOL isFindExtend = FALSE;	//是否找到 扩展分区
+		DWORD sys_start_pos = 0;
+		for (INT j = 0; j < 4; j++)
+		{
+			//检查是否主分区,  --主分区 ,即非扩展分区0F/05   通过文件系统标志位
+			if (sector[sector_size - 66 + 4 + j * 16] != 0x0F
+				&& sector[sector_size - 66 + 4 + j * 16] != 0x05)
+			{
+				//检测分区有效性, 通过分区前 预留扇区  标志位
+				memcpy_s(&sys_start_pos, sizeof(sys_start_pos),
+					&sector[sector_size - 66 + 8 + j * 16], 4);
+				if (sys_start_pos > 0)
+				{
+					//找到分区表 第一个有效项
+					m_activePartitionNum = j + 1;
+					isFindMain = TRUE;		//找到主分区
+					break;
+				}
+			}
+			else
+			{	//找到 扩展分区
+				isFindExtend = TRUE;
+			}
+		}
+
+		if (!isFindMain && !isFindExtend)
+		{	//没有主分区 和 扩展分区, 即U盘什么分区都没有
+			res = FALSE;
+			goto FINAL;
+		}
+		else if (!isFindMain && isFindExtend)
+		{	//没有主分区 和 只有扩展分区, 不符合做启动盘要求
+			res = -1;
+			goto FINAL;
+		}
+		//剩下的就是找到主分区了
+	}
+
+	for (INT i = 1; i <= 4; i++)
+	{
+		if (m_activePartitionNum == i)
+		{
+			//检测  文件系统类型  标志位 是否为 扩展分区0F/05
+			if (sector[sector_size - 66 + 4 + (i - 1) * 16] != 0x0F
+				&& sector[sector_size - 66 + 4 + (i - 1) * 16] != 0x05)
+			{
+				sector[sector_size - 66 + (i - 1) * 16] = 0x80;
+				//让循环继续执行, 使 非活动分区 设为0x00
+			}
+			else
+			{
+				res = -1;	//扩展分区不可以做启动盘, 只有主分区才可以
+				goto FINAL;
+			}
+		}
+		else
+			sector[sector_size - 66 + (i - 1) * 16] = 0x00;
+	}
+
+	//开始写入扇区
+	DWORD dwBytes = 0;
+	SetFilePointer(m_hDevice, 0, 0, FILE_BEGIN);
+	WriteFile(m_hDevice, sector, sector_size, &dwBytes, NULL);
+	if (dwBytes == sector_size)
+	{
+		res = TRUE;
+		goto FINAL;
+	}
+	else
+	{
+		goto FINAL;		//res = FALSE;
+	}
+
 
 FINAL:
 	if (sector)
@@ -1281,10 +1544,18 @@ ERROR1:
 	return FALSE;
 }
 
-INT CCreateStartDlg::InstallPBR(HANDLE *hDevice, LPCSTR drive, LPCSTR disk, DISK_GEOMETRY* diskGeometry)
+INT CCreateStartDlg::InstallPBR(
+	HANDLE *hDevice, LPCSTR drive /*= NULL*/, LPCSTR disk /*= NULL*/, 
+	BOOL use_hDrive /*= FALSE*/, DISK_GEOMETRY* diskGeometry /*= NULL*/)
 {
+	//use_hDrive 表示 是否使用 分区的句柄 来代替磁盘句柄, 当TRUE时候, 需要传入有效的drive,且hDevice ==NULL
+	//只有当安装PBR的分区 是系统当前显示的分区, 且安装的PBR是NTFS_PBR时, 才[必须]用到
+	//因为经过多次测试, 如果是上述情况时, 写入的NTFS_PBR会失败, 因系统貌似保护着U盘显示分区的第一个引导扇区之后的几个扇区
+	//不过通过hDrive分区的句柄 却可以写入成功.   当然由于FAT32_PBR==512Byte==第一个引导扇区大小, 应该没被保护, 就顺利写入了
+
 	HANDLE m_hDevice = INVALID_HANDLE_VALUE;
 	unsigned char* sector = NULL;
+
 	if (hDevice && *hDevice != INVALID_HANDLE_VALUE)
 	{
 		m_hDevice = *hDevice;
@@ -1349,23 +1620,40 @@ INT CCreateStartDlg::InstallPBR(HANDLE *hDevice, LPCSTR drive, LPCSTR disk, DISK
 	else
 		goto ERROR1;
 
-	INT sector_size = 0;
-	if (!(sector_size = this->GetDiskSector(sector, &m_hDevice, NULL, NULL, &m_diskGeometry)))
-		goto ERROR1;
+	//////////////////////////////////////////////////////////////////////////
 
 	LARGE_INTEGER offset;
 	DWORD dwBytes = 0;
-	INT sys_start_pos = 0;
-	//获取活动分区开始位置
-	memcpy_s(&sys_start_pos, sizeof(sys_start_pos), &sector[sector_size - 66 + 8 + (m_ActivePartitionNum - 1) * 16], 4);
-	if (sys_start_pos <= 0)
-		goto ERROR1;
-	offset.QuadPart = (ULONG64)sys_start_pos * (ULONG64)m_diskGeometry.BytesPerSector;
-	
+	if (use_hDrive)
+	{
+		if (!drive)
+			goto ERROR1;
+		if (m_hDevice)
+			CloseHandle(m_hDevice);
+		if (!this->GetDriveHandle(drive, &m_hDevice))
+			goto ERROR1;
+		
+		SetFilePointer(m_hDevice, 0, 0, FILE_BEGIN);
+	}
+	else
+	{
+		INT sector_size = 0;
+		if (!(sector_size = this->GetDiskSector(sector, &m_hDevice, NULL, NULL, &m_diskGeometry)))
+			goto ERROR1;
+
+		DWORD sys_start_pos = 0;
+		//获取活动分区开始位置
+		memcpy_s(&sys_start_pos, sizeof(sys_start_pos), &sector[sector_size - 66 + 8 + (m_ActivePartitionNum - 1) * 16], 4);
+		if (sys_start_pos <= 0)
+			goto ERROR1;
+		offset.QuadPart = (ULONG64)sys_start_pos * (ULONG64)m_diskGeometry.BytesPerSector;
+		
+		SetFilePointer(m_hDevice, offset.LowPart, &offset.HighPart, FILE_BEGIN);
+	}
+
 	//写入活动分区的引导扇区
-	SetFilePointer(m_hDevice, offset.LowPart, &offset.HighPart, FILE_BEGIN);
 	WriteFile(m_hDevice, pbr_data, pbr_data_size, &dwBytes, NULL);
-	if (dwBytes == pbr_data_size)
+	if (dwBytes == dwBytes)
 	{
 		if (!hDevice)
 			CloseHandle(m_hDevice);
@@ -1375,13 +1663,14 @@ INT CCreateStartDlg::InstallPBR(HANDLE *hDevice, LPCSTR drive, LPCSTR disk, DISK
 	}
 	else
 	{
+		INT II = GetLastError();
+		II += 0;
 		goto ERROR1;
 	}
-	
-	
+
 
 ERROR1:
-	if (!hDevice)
+	if (!hDevice || use_hDrive)
 		CloseHandle(m_hDevice);
 	if (sector)
 		delete[] sector;
@@ -1511,8 +1800,16 @@ INT CCreateStartDlg::StartUnZip()
 
 INT CCreateStartDlg::UnZip()
 {
-	if (!this->RemountDrive(2, FALSE))	//挂载U盘第2分区
-		goto ERROR2;
+	if (this->m_FormatState)	//需要格式化, 即是用  推荐选项--格式化再制作启动盘
+	{
+		if (!this->RemountDrive(2, FALSE))	//挂载U盘第2分区
+			goto ERROR2;
+	}
+	else	//需要格式化, 即是用 保留数据再制作启动盘
+	{
+		if (!this->RemountDrive(1, FALSE))	//相当于重新挂载U盘
+			goto ERROR2;
+	}
 
 	if (!this->Free7z(NULL, FALSE))		//释放7z
 		goto ERROR1;
@@ -1547,7 +1844,7 @@ INT CCreateStartDlg::UnZip()
 		strcat_s(m_isoPath, MAX_PATH, "\\Data\\CA.iso");		//iso路径
 	}
 
-	sprintf_s(Parameters, _T("x \"%s\" -o\"%s\""), m_isoPath, this->m_UnZipArg->desPath);		//Parameters参数
+	sprintf_s(Parameters, _T("x \"%s\" -o\"%s\" -y"), m_isoPath, this->m_UnZipArg->desPath);		//Parameters参数
 	
 	SHELLEXECUTEINFO sei;
 	// 启动进程 
@@ -1574,7 +1871,8 @@ INT CCreateStartDlg::UnZip()
 	else if (WAIT_OBJECT_0 == res)
 	{
 		this->Free7z(NULL, TRUE);		//清除7z.exe
-		this->RemountDrive(2, TRUE);	//还原U盘分区设置
+		if (this->m_FormatState)	//需要格式化, 即是用  推荐选项--格式化再制作启动盘
+			this->RemountDrive(2, TRUE);	//还原U盘分区设置
 		::PostMessage(this->m_UnZipArg->msgWnd, WM_MYMSG, UNZIP_OK, 0);
 		return TRUE;
 	}
@@ -1586,7 +1884,12 @@ INT CCreateStartDlg::UnZip()
 
 
 ERROR1:
-	this->RemountDrive(2, TRUE);	//还原U盘分区设置
+	if (this->m_FormatState)	//需要格式化, 即是用  推荐选项--格式化再制作启动盘
+		this->RemountDrive(2, TRUE);	//还原U盘分区设置
+	//else	//不需要格式化, 即是用 保留数据再制作启动盘
+	//{	不需要做操作
+	//}
+
 ERROR2:
 	this->Free7z(NULL, TRUE);		//清除7z.exe
 	::PostMessage(this->m_UnZipArg->msgWnd, WM_MYMSG, UNZIP_ERROR, 0);
@@ -1636,6 +1939,7 @@ INT CCreateStartDlg::RemountDrive(INT remountNum /*= 2*/, BOOL isRestore /*= FAL
 	//本函数使系统挂载U盘中第remountNum个分区(1, 2, 3, 4)
 	//isRestore表示是否将U盘的分区挂载情况复原
 	//一般第一次调用设置remountNum值 , 第二次调用 增加设置isRestore值
+	//desPath 可以被设为"g:"等,达到重新挂载该盘
 	CString order;
 	switch (remountNum)
 	{
@@ -1701,65 +2005,107 @@ BOOL CCreateStartDlg::OnDeviceChange(UINT nEventType, DWORD_PTR dwData)
 	case 0x8000:		// DBT_DEVICEARRIVAL==0x8000		u盘插入
 	case 0x8004:		//DBT_DEVICEREMOVECOMPLETE==0x8004	u盘拔出
 	{
-		this->m_USB_ViewerDlg->GetUSB(this, IDC_SELECT_USB);	//重新加载U盘
+		this->m_USB_ViewerDlg->GetUSB(this, IDC_COMBO1);	//重新加载U盘
 		return TRUE;
 	}
 	}
 	return 0;
 }
 
-INT CCreateStartDlg::CheckMbrPbr(UCHAR sector[], INT sector_size, Partition_Table* list /*= NULL*/)
+INT CCreateStartDlg::CheckMbrPbr(
+	UCHAR sector[], INT sector_size, Partition_Table* list /*= NULL*/, 
+	HANDLE *hDevice/* = NULL*/, LPCSTR drive /*= NULL*/, LPCSTR disk /*= NULL*/)
 {
-	INT type = NO_MBR_PBR;
-	
+	INT res = FALSE;
+	HANDLE m_hDevice = INVALID_HANDLE_VALUE;
+	DISK_GEOMETRY diskGeometry;
+	UCHAR* m_sector = NULL;
+	if (sector_size > 0 && sector)
+	{
+		m_sector = sector;
+	}
+	else if(hDevice || drive || disk)
+	{
+		if (hDevice)
+			m_hDevice = *hDevice;
+		else
+		{
+			if (!this->GetDiskHandle(drive, disk, &m_hDevice))
+				goto FINAL;
+		}
+
+		if (!this->GetDiskGeometry(&m_hDevice, NULL, NULL, &diskGeometry))
+			goto FINAL;
+		m_sector = new UCHAR[diskGeometry.BytesPerSector]();
+		if (!(sector_size = this->GetDiskSector(m_sector, &m_hDevice, NULL, NULL, &diskGeometry)))
+			goto FINAL;
+	}
+	else
+		goto FINAL;
+
+
+	res = NO_MBR_PBR;
 	//检查魔数 55AA
-	if (sector[sector_size - 2] != 0x55
-		|| sector[sector_size - 1] != 0xAA)
-		return NO_MBR_PBR;
+	if (m_sector[sector_size - 2] != 0x55
+		|| m_sector[sector_size - 1] != 0xAA)
+	{
+		res = NO_MBR_PBR;
+		goto FINAL;
+	}
 
 	//检验是否为mbr
 	BOOL isMBR = TRUE;
 	for (int i = 0; i < 4; i++)
 	{
 		//检查活动分区标志位
-		if (sector[sector_size - 66 + i * 16] != 0x80
-			&& sector[sector_size - 66 + i * 16] != 0x00)
+		if (m_sector[sector_size - 66 + i * 16] != 0x80
+			&& m_sector[sector_size - 66 + i * 16] != 0x00)
 		{
 			isMBR = FALSE;
 			break;
 		}
 	}
 	if (isMBR)
-		return type = MBR;
+	{
+		res = MBR;
+		goto FINAL;
+	}
 
 	//检查是否为NTFS_PBR
 	CHAR name[6] = { 0 };
-	memcpy_s(name, sizeof(name), &sector[3], 4);		//sector[3,4,5,6]是NTFS的File system ID ("NTFS")
+	memcpy_s(name, sizeof(name), &m_sector[3], 4);		//m_sector[3,4,5,6]是NTFS的File system ID ("NTFS")
 	//判断分区的文件系统
 	if (strcmp(name, TEXT("NTFS")) == 0)
 	{
-		type = PBR_NTFS;
+		res = PBR_NTFS;
+		goto FINAL;
 	}
 	else
 	{
 		//检查是否为FAT32_PBR
 		ZeroMemory(name, sizeof(name));
-		memcpy_s(name, sizeof(name), &sector[82], 5);		//sector[82,83,84,85,86]是FAT32的File system标志位("FAT32")
+		memcpy_s(name, sizeof(name), &m_sector[82], 5);		//m_sector[82,83,84,85,86]是FAT32的File system标志位("FAT32")
 		if (strcmp(name, TEXT("FAT32")) == 0)
-			type = PBR_FAT32;
+			res = PBR_FAT32;
 		else
-			return type = NO_MBR_PBR;
+		{
+			res = NO_MBR_PBR;
+			goto FINAL;
+		}
 	}
 
 	//如果有需要则, 设置分区的  文件系统type 和 大小size 参数
 	if (!list)
 	{
 		DWORD partitionSize = 0;
-		if (PBR_NTFS == type)
+		if (PBR_NTFS == res)
 		{
-			memcpy_s(&partitionSize, sizeof(DWORD), &sector[40], 4);		//ntfs引导扇区中 分区总共扇区 标志位
+			memcpy_s(&partitionSize, sizeof(DWORD), &m_sector[40], 4);		//ntfs引导扇区中 分区总共扇区 标志位
 			if (partitionSize <= 0)
-				return type = NO_MBR_PBR;
+			{
+				res = NO_MBR_PBR;
+				goto FINAL;
+			}
 			else
 				partitionSize++;		//因为ntfs的 分区总共扇区 是算少了第一个引导扇区的 , 而fat32中是没有算少的
 
@@ -1767,18 +2113,36 @@ INT CCreateStartDlg::CheckMbrPbr(UCHAR sector[], INT sector_size, Partition_Tabl
 			list->size = ULONG64((ULONG64)partitionSize * (ULONG64)sector_size / (1024.0 * 1024.0));
 			//没有diskGeometry->BytesPerSector, 就用sector_size代替
 		}
-		else if (PBR_FAT32 == type)
+		else if (PBR_FAT32 == res)
 		{
-			memcpy_s(&partitionSize, sizeof(DWORD), &sector[32], 4);		//fat32引导扇区中 分区总共扇区 标志位	Sectors (on large volumes)
+			memcpy_s(&partitionSize, sizeof(DWORD), &m_sector[32], 4);		//fat32引导扇区中 分区总共扇区 标志位	Sectors (on large volumes)
 			if (partitionSize <= 0)
-				return type = NO_MBR_PBR;
+			{
+				res = NO_MBR_PBR;
+				goto FINAL;
+			}
 
 			strcpy_s(list->type, sizeof(list->type), TEXT("FAT32"));
 			list->size = ULONG64((ULONG64)partitionSize * (ULONG64)sector_size / (1024.0 * 1024.0));
 			//没有diskGeometry->BytesPerSector, 就用sector_size代替
 		}
 		else
-			return type = NO_MBR_PBR;
+		{
+			res = NO_MBR_PBR;
+			goto FINAL;
+		}
 	}
-	return type;	//可能是PBR_FAT32 或者 PBR_NTFS
+	goto FINAL;		//可能是PBR_FAT32 或者 PBR_NTFS
+
+
+FINAL:
+	if (!hDevice)
+		CloseHandle(m_hDevice);		//CloseHandle()已经对m_hDevice == 0xfffff 有防错处理
+	if (sector_size <= 0 || !sector)
+	{
+		if (m_sector)
+			delete[] m_sector;
+	}
+
+	return res;
 }

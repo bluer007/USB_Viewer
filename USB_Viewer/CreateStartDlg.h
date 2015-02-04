@@ -26,8 +26,9 @@ public:
 	INT GetPartitionBootSector(UCHAR sector[], HANDLE *hDevice, INT partitionNum, DISK_GEOMETRY* diskGeometry);
 	INT GetOnePartitionInfo(Partition_Table *list, HANDLE *hDevice, INT partitionNum, DISK_GEOMETRY* diskGeometry);
 	INT GetActivePartitionNum(HANDLE *hDevice, LPCSTR drive, LPCSTR disk);
+	INT SetActivePartitionNum(INT activePartitionNum, HANDLE *hDevice, LPCSTR drive, LPCSTR disk);
 	LARGE_INTEGER GetUSBAllSize(LPCSTR drive);
-	INT CheckMbrPbr(UCHAR sector[], INT sector_size, Partition_Table* list = NULL);
+	INT CheckMbrPbr(UCHAR sector[], INT sector_size, Partition_Table* list = NULL, HANDLE *hDevice = NULL, LPCSTR drive = NULL, LPCSTR disk = NULL);
 	INT __stdcall UnZip();
 	INT StartUnZip();
 	INT Free7z(LPCSTR path = NULL, BOOL isDelete = FALSE);
@@ -42,7 +43,7 @@ public:
 	INT GetDiskGeometry(HANDLE *hDevice, LPCSTR drive, LPCSTR disk, DISK_GEOMETRY* diskGeometry);
 	INT ChangePartitionTable(HANDLE *hDisk, LPCSTR drive, LPCSTR disk, LPCSTR order = NULL);
 	INT InstallMBR(HANDLE *hDevice, LPCSTR drive, LPCSTR disk, DISK_GEOMETRY* diskGeometry);
-	INT InstallPBR(HANDLE *hDevice, LPCSTR drive, LPCSTR disk, DISK_GEOMETRY* diskGeometry);
+	INT InstallPBR(HANDLE *hDevice, LPCSTR drive = NULL, LPCSTR disk = NULL, BOOL use_hDrive = FALSE, DISK_GEOMETRY* diskGeometry = NULL);
 
 private:
 	CUSB_ViewerDlg *m_USB_ViewerDlg;

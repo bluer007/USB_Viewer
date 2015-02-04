@@ -465,9 +465,15 @@ INT CPartitionDlg::SetActive(INT activeNum)
 	for (int i = 0; i < 4; i++)
 	{
 		if (i == activeNum)
+		{
 			this->p_active[activeNum]->SetCheck(!(this->p_active[activeNum]->GetCheck()));
+			this->p_active[activeNum]->SetWindowText(TEXT("»î¶¯"));
+		}
 		else
+		{
 			this->p_active[i]->SetCheck(FALSE);
+			this->p_active[i]->SetWindowText(TEXT(""));
+		}
 	}
 	return TRUE;
 }
