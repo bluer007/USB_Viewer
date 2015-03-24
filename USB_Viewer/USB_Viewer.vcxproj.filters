@@ -75,9 +75,22 @@
     <None Include="res\unzip1.bin">
       <Filter>资源文件</Filter>
     </None>
+    <None Include="res\unzip2.bin">
+      <Filter>资源文件</Filter>
+    </None>
+    <None Include="7z.exe" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="res\USB_Viewer.ico">
+      <Filter>资源文件</Filter>
+    </Image>
+    <Image Include="res\ico.png">
+      <Filter>资源文件</Filter>
+    </Image>
+    <Image Include="res\icon1.ico">
+      <Filter>资源文件</Filter>
+    </Image>
+    <Image Include="res\ico.ico">
       <Filter>资源文件</Filter>
     </Image>
   </ItemGroup>

@@ -396,6 +396,7 @@ void CUSB_ViewerDlg::OnBnClickedOk()
 		return;
 	}
 
+	((CButton*)GetDlgItem(IDOK))->EnableWindow(FALSE);
 	CCreateStartDlg m_CreateStartDlg;
 	if (m_CreateStartDlg.RemountDrive(num, FALSE, TEXT(str.GetBuffer())))
 	{
@@ -406,6 +407,7 @@ void CUSB_ViewerDlg::OnBnClickedOk()
 	{
 		AfxMessageBox(TEXT("出大事了, 操作失败啊~啊~啊~~ T_T"));
 	}
+	((CButton*)GetDlgItem(IDOK))->EnableWindow(TRUE);
 	this->GetUSB(this, IDC_COMBO1);
 	this->OnCbnSelchangeCombo1();
 
@@ -539,20 +541,23 @@ INT CUSB_ViewerDlg::GetUSB(CDialogEx* dialog, INT ID)
 			unsigned __int64 i64TotalBytes = 0;
 			unsigned __int64 i64FreeBytes = 0;
 
+			CCreateStartDlg m_CreateStartDlg;
+			LARGE_INTEGER usb_allSize = m_CreateStartDlg.GetUSBAllSize((LPCSTR)(&Drive[i]));
+/*
 			GetDiskFreeSpaceEx(&Drive[i],
 				(PULARGE_INTEGER)&i64FreeBytesToCaller,
 				(PULARGE_INTEGER)&i64TotalBytes,
-				(PULARGE_INTEGER)&i64FreeBytes);
+				(PULARGE_INTEGER)&i64FreeBytes);*/
 
-			if (i64TotalBytes / (1024.0 * 1024.0) <= 1000)	
+			if (usb_allSize.QuadPart / (1024.0 * 1024.0) <= 1000)
 			{
 				//容量少于1000M 就用mb做显示单位
-				strTemp.Format("%s  %.0fM", &Drive[i], i64TotalBytes / (1024.0 * 1024.0));
+				strTemp.Format("%s  %.0fM", &Drive[i], usb_allSize.QuadPart / (1024.0 * 1024.0));
 				((CComboBox*)dialog->GetDlgItem(ID))->AddString(strTemp);
 			}
 			else
 			{
-				strTemp.Format("%s  %.1fG", &Drive[i], i64TotalBytes / (1024.0 * 1024.0 * 1024.0));
+				strTemp.Format("%s  %.1fG", &Drive[i], usb_allSize.QuadPart / (1024.0 * 1024.0 * 1024.0));
 				((CComboBox*)dialog->GetDlgItem(ID))->AddString(strTemp);
 			}	
 			num++;
@@ -606,9 +611,9 @@ void CUSB_ViewerDlg::OnCbnSelchangeCombo1()
 	for (int i = 0; i < num; i++)
 	{
 		if (list[i].size < 1000)
-			sprintf_s(strSize, sizeof(strSize), "(%d)  %dM", i + 1, list[i].size);
+			sprintf_s(strSize, sizeof(strSize), "(第%d分区)   %dM", i + 1, list[i].size);
 		else
-			sprintf_s(strSize, sizeof(strSize), "(%d)  %.1fG", i + 1, list[i].size / 1024.0);
+			sprintf_s(strSize, sizeof(strSize), "(第%d分区)   %.1fG", i + 1, list[i].size / 1024.0);
 		nIndex = m_ListCtrl->InsertItem(i, strSize);
 		if (nIndex < 0)
 			goto FINAL;
@@ -1135,7 +1140,8 @@ void CUSB_ViewerDlg::OnCeatestart()
 	// TODO:  在此添加命令处理程序代码
 	CCreateStartDlg dlg;
 	INT_PTR nResponse = dlg.DoModal();
-
+	this->GetUSB(this, IDC_COMBO1);		// 更新所有U盘设备,并显示到组合框中
+	this->OnCbnSelchangeCombo1();		//更新列表框中 分区表 的显示
 }
 
 
@@ -1291,4 +1297,6 @@ void CUSB_ViewerDlg::OnPartition()
 	// TODO:  在此添加命令处理程序代码
 	CPartitionDlg dlgPartition;
 	dlgPartition.DoModal();
+	this->GetUSB(this, IDC_COMBO1);		// 更新所有U盘设备,并显示到组合框中
+	this->OnCbnSelchangeCombo1();		//更新列表框中 分区表 的显示
 }

@@ -66,6 +66,7 @@ ON_BN_CLICKED(IDCANCEL, &CPartitionDlg::OnBnClickedCancel)
 ON_BN_CLICKED(IDOK, &CPartitionDlg::OnBnClickedOk)
 ON_MESSAGE(WM_MYMSG, &CPartitionDlg::OnMymsg)
 ON_WM_DEVICECHANGE()		//用于接收设备(U盘)变动, 已更新界面的消息
+ON_WM_TIMER()
 END_MESSAGE_MAP()
 
 
@@ -263,7 +264,7 @@ void CPartitionDlg::OnBnClickedOk()
 		if ((allSize += m_table[i].size) > (ULONG64)usb_size.QuadPart)
 		{
 			//同时 也处理了  多次选择  全部容量  的问题
-			AfxMessageBox(TEXT("分区的【总大小】超过 U盘容量啦"));
+			AfxMessageBox(TEXT("所有分区的【总大小】超过 U盘容量啦"));
 			return;
 		}
 	}
@@ -340,9 +341,14 @@ void CPartitionDlg::OnBnClickedOk()
 	{
 		//经过上面检测 和 确认, 说明用户所有设置有效 , 可以分区
 		this->m_FormatState = TRUE;
-		if(!m_CreateStartDlg->Partition(this->m_drive.GetBuffer(), itemCount, m_table, activeNum,
+		m_CreateStartDlg->SetMyTimer(GetSafeHwnd(), TIMER_Partition, TIMER_Partition_time, FALSE);
+		if (!m_CreateStartDlg->Partition(this->m_drive.GetBuffer(), itemCount, m_table, activeNum,
 			this->GetSafeHwnd(), NULL))
+		{
+			((CButton*)(this->GetDlgItem(IDOK)))->SetWindowText(TEXT("开始分区"));
+			m_CreateStartDlg->SetMyTimer(GetSafeHwnd(), TIMER_Partition, TIMER_Partition_time, TRUE);
 			this->m_FormatState = FALSE;
+		}
 	}
 	//CDialogEx::OnOK();
 }
@@ -467,12 +473,15 @@ INT CPartitionDlg::SetActive(INT activeNum)
 		if (i == activeNum)
 		{
 			this->p_active[activeNum]->SetCheck(!(this->p_active[activeNum]->GetCheck()));
-			this->p_active[activeNum]->SetWindowText(TEXT("活动"));
+			if (this->p_active[activeNum]->GetCheck())
+				this->p_active[activeNum]->SetWindowText(TEXT("活动分区"));
+			else
+				this->p_active[activeNum]->SetWindowText(TEXT("设置"));
 		}
 		else
 		{
 			this->p_active[i]->SetCheck(FALSE);
-			this->p_active[i]->SetWindowText(TEXT(""));
+			this->p_active[i]->SetWindowText(TEXT("设置"));
 		}
 	}
 	return TRUE;
@@ -498,6 +507,12 @@ BOOL CPartitionDlg::IsNumber(CString& str)
 void CPartitionDlg::OnBnClickedCancel()
 {
 	// TODO:  在此添加控件通知处理程序代码
+	if (this->m_FormatState)
+	{
+		AfxMessageBox(TEXT("分区ing咧, 请稍后^_^"));
+		return;
+	}
+
 	CDialogEx::OnCancel();
 }
 
@@ -506,6 +521,7 @@ afx_msg LRESULT CPartitionDlg::OnMymsg(WPARAM wParam, LPARAM lParam)
 {
 	if (this->m_FormatState)
 	{
+		this->m_USB_ViewerDlg->GetUSB(this, IDC_SELECT_USB);	//重新加载U盘
 		if (FORMAT_OK == wParam)
 		{
 			AfxMessageBox("U盘分区成功");
@@ -533,4 +549,28 @@ BOOL CPartitionDlg::OnDeviceChange(UINT nEventType, DWORD_PTR dwData)
 		}
 	}
 	return 0;
+}
+
+
+void CPartitionDlg::OnTimer(UINT_PTR nIDEvent)
+{
+	static int num = 1;
+	switch (num)
+	{
+	case 1:
+		((CButton*)(this->GetDlgItem(IDOK)))->SetWindowText(TEXT(" 分区ing."));
+		break;
+	case 2:
+		((CButton*)(this->GetDlgItem(IDOK)))->SetWindowText(TEXT("  分区ing.."));
+		break;
+	case 3:
+		((CButton*)(this->GetDlgItem(IDOK)))->SetWindowText(TEXT("   分区ing..."));
+		break;
+	case 4:
+		((CButton*)(this->GetDlgItem(IDOK)))->SetWindowText(TEXT("分区ing"));
+		break;
+	}
+	num = ++num > 4 ? 1 : num;
+
+	CDialogEx::OnTimer(nIDEvent);
 }

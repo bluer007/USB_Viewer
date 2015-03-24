@@ -132,10 +132,15 @@
     <ResourceCompile Include="USB_Viewer.rc" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="7z.exe" />
     <None Include="res\unzip1.bin" />
+    <None Include="res\unzip2.bin" />
     <None Include="res\USB_Viewer.rc2" />
   </ItemGroup>
   <ItemGroup>
+    <Image Include="res\ico.ico" />
+    <Image Include="res\ico.png" />
+    <Image Include="res\icon1.ico" />
     <Image Include="res\USB_Viewer.ico" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

@@ -20,6 +20,11 @@ public:
 	BOOL IsNumber(CString& str);
 
 private:
+	enum
+	{
+		TIMER_Partition = 1001,
+		TIMER_Partition_time = 750
+	};
 	CString m_drive;
 
 	CCreateStartDlg* m_CreateStartDlg;
@@ -73,7 +78,8 @@ protected:
 	afx_msg void OnBnClickedActive4();
 	afx_msg void OnBnClickedCancel();
 	afx_msg void OnBnClickedOk();
-
+	afx_msg void OnTimer(UINT_PTR nIDEvent);					//实现分区ing的动态效果
 	afx_msg LRESULT OnMymsg(WPARAM wParam, LPARAM lParam);		//对分区结果的接收
 	afx_msg BOOL OnDeviceChange(UINT nEventType, DWORD_PTR dwData);		//用户检测U盘的插入 拔出
+
 };

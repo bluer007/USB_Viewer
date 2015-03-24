@@ -44,6 +44,7 @@ public:
 	INT ChangePartitionTable(HANDLE *hDisk, LPCSTR drive, LPCSTR disk, LPCSTR order = NULL);
 	INT InstallMBR(HANDLE *hDevice, LPCSTR drive, LPCSTR disk, DISK_GEOMETRY* diskGeometry);
 	INT InstallPBR(HANDLE *hDevice, LPCSTR drive = NULL, LPCSTR disk = NULL, BOOL use_hDrive = FALSE, DISK_GEOMETRY* diskGeometry = NULL);
+	INT SetMyTimer(HWND hWnd, UINT timerID, UINT time, BOOL isKill = FALSE);
 
 private:
 	CUSB_ViewerDlg *m_USB_ViewerDlg;
@@ -53,6 +54,11 @@ private:
 	INT m_FormatState;
 	INT m_needUnzip;
 	HANDLE m_hVolume;
+	enum 
+	{ 
+		TIMER_Start = 1000,
+		TIMER_Start_time = 750
+	};
 
 public:
 	// 对话框数据
@@ -61,10 +67,12 @@ public:
 	afx_msg void OnBnClickedOk();
 	afx_msg LRESULT OnGetResult(WPARAM wParam, LPARAM lParam);
 	afx_msg BOOL OnDeviceChange(UINT nEventType, DWORD_PTR dwData);		//检测U盘插入  拔出
-
+	afx_msg void OnTimer(UINT_PTR nIDEvent);		//实现制作ing的动态效果
+	
 	// 生成的消息映射函数
 	virtual BOOL OnInitDialog();
 
 	DECLARE_MESSAGE_MAP()
+afx_msg void OnBnClickedCancel();
 };
 

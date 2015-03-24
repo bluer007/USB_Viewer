@@ -53,6 +53,6 @@ protected:
 
 public:
 	afx_msg void OnAbout();
-afx_msg void OnBnClickedCancel();
-afx_msg void OnPartition();
+	afx_msg void OnBnClickedCancel();
+	afx_msg void OnPartition();
 };
