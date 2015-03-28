@@ -61,7 +61,6 @@ void CCreateStartDlg::OnBnClickedOk()
 {
 	// TODO:  在此添加控件通知处理程序代码
 	//CDialogEx::OnOK();
-	this->SetMyTimer(GetSafeHwnd(), TIMER_Start, TIMER_Start_time, FALSE);
 	if (this->m_FormatState || this->m_needUnzip)
 	{
 		AfxMessageBox(TEXT("制作启动盘ing, 请稍后"));
@@ -159,10 +158,19 @@ void CCreateStartDlg::OnBnClickedOk()
 				this->m_UnZipArg = new UnZipArg();
 			else
 				ZeroMemory(this->m_UnZipArg, sizeof(*(this->m_UnZipArg)));
+			
+			//填写 解压 参数
 			strcpy_s(this->m_UnZipArg->desPath, MAX_PATH, TEXT(str.GetBuffer()));
+			strcpy_s(this->m_UnZipArg->isoPath, MAX_PATH, TEXT(m_isoPath));
+			
+			this->SetMyTimer(GetSafeHwnd(), TIMER_Start, TIMER_Start_time, FALSE);		//开始文字动态效果
+
 			if (!this->Partition(TEXT(str.GetBuffer()), sizeof(table) / sizeof(Partition_Table), table, 2,
 				this->GetSafeHwnd(), NULL))
 			{
+				//若分区失败, 取消文字动态效果
+				this->SetMyTimer(GetSafeHwnd(), TIMER_Start, TIMER_Start_time, TRUE);
+				((CButton*)(this->GetDlgItem(IDOK)))->SetWindowText(TEXT("开始制作!"));
 				this->m_FormatState = FALSE;
 				this->m_needUnzip = FALSE;
 			}
@@ -280,10 +288,18 @@ void CCreateStartDlg::OnBnClickedOk()
 				this->m_UnZipArg = new UnZipArg();
 			else
 				ZeroMemory(this->m_UnZipArg, sizeof(*(this->m_UnZipArg)));
-			strcpy_s(this->m_UnZipArg->desPath, MAX_PATH, TEXT(str.GetBuffer()));
 
-			if (!this->StartUnZip())	//开始写入镜像
+			//填写 解压 参数
+			strcpy_s(this->m_UnZipArg->desPath, MAX_PATH, TEXT(str.GetBuffer()));
+			strcpy_s(this->m_UnZipArg->isoPath, MAX_PATH, TEXT(m_isoPath));
+
+			this->SetMyTimer(GetSafeHwnd(), TIMER_Start, TIMER_Start_time, FALSE);		//开始文字动态效果
+
+			if (!this->StartUnZip())	//开始写入镜像(多线程的), 所以要先写入mbr,pbr扇区
 			{
+				//若解压失败, 取消文字动态效果
+				this->SetMyTimer(GetSafeHwnd(), TIMER_Start, TIMER_Start_time, TRUE);
+				((CButton*)(this->GetDlgItem(IDOK)))->SetWindowText(TEXT("开始制作!"));
 				CloseHandle(hDevice);
 				CloseHandle(hfile);
 				AfxMessageBox(TEXT("很遗憾, 写入镜像出错了T_T"));
@@ -349,9 +365,13 @@ INT CCreateStartDlg::Partition(TCHAR* drive, INT num, Partition_Table* list, INT
 		if (sector)
 		{
 			SetFilePointer(hDrv, 0, 0, FILE_BEGIN);
+			//获取U盘第一个扇区, 即mbr扇区
 			ReadFile(hDrv, sector, dwSize, &dwBytes, NULL);
 			if (dwBytes == dwSize)
 			{
+				//判断mbr扇区是不是分区的pbr扇区,  下面有用
+				INT type = this->CheckMbrPbr(sector, dwSize, NULL, NULL, NULL, NULL);
+
 				this->CreatePartitionTable(sector, dwSize, num, list, activeNum, &diskGeometry);
 
 				dwBytes = 0;
@@ -361,6 +381,13 @@ INT CCreateStartDlg::Partition(TCHAR* drive, INT num, Partition_Table* list, INT
 				if (dwBytes == dwSize)
 				{
 					//AfxMessageBox(_T(" U盘分区表设置成功!"));
+					if (PBR_NTFS == type || PBR_FAT32 == type)
+					{
+						//如果mbr扇区就是分区pbr扇区的话, 通过改变分区表来分区的办法就会失败, 所以要变mbr扇区为非pbr扇区
+						if (!this->InstallMBR(&hDrv, NULL, NULL, &diskGeometry))		//安装MBR扇区
+							goto ERROR2;
+					}
+
 					if (!this->RemountDrive(1, FALSE, drive))
 						goto ERROR2;
 					if (!this->DeletePartitionBootSector(&hDrv, num,sector, dwSize, &diskGeometry))		//清零分区表对应分区的引导扇区
@@ -1216,7 +1243,7 @@ INT CCreateStartDlg::CreatePartitionTable(UCHAR sector[], INT sector_size, INT n
 		{
 			sys_end_pos[2] = 0xff;
 			sys_end_pos[1] = 0xff;
-			sys_end_pos[0] = 0xff;
+			sys_end_pos[0] = 0xfe;
 		}
 		else
 		{
@@ -1288,7 +1315,7 @@ INT CCreateStartDlg::DeletePartitionBootSector(HANDLE *hDevice, INT num, UCHAR s
 			DWORD ntfs_size = 0;
 			memcpy_s(&ntfs_size, 4, &sector[sector_size - 66 + 12 + i * 16],4);
 			ntfs_size--;
-			//因为ntfs的引导扇区中, 文件大小标志位(Total sectors)是减一的
+			//因为ntfs的引导扇区中, 文件大小标志位(Total sectors)是减1的
 			memcpy_s(&newBootSector[40], 4, &ntfs_size, 4);
 		}
 
@@ -1864,15 +1891,12 @@ INT CCreateStartDlg::StartUnZip()
 	};*/
 	if (!this->m_UnZipArg)
 		this->m_UnZipArg = new UnZipArg();		//new进行初始化
-	else
-	{
-		*this->m_UnZipArg->exePath = '\0';
-		*this->m_UnZipArg->isoPath = '\0';
-	}
+
 	//this->m_UnZipArg->desPath =		//由CCreateStartDlg::OnBnClickedOk()填写
-	//this->m_UnZipArg->exePath = ;		//已经设置为NULL
-	//this->m_UnZipArg->isoPath = ;		//
+	//this->m_UnZipArg->exePath = ;		//已经设置为NULL, CCreateStartDlg::UnZip()会补填
+	//this->m_UnZipArg->isoPath = ;		//由CCreateStartDlg::OnBnClickedOk()填写
 	this->m_UnZipArg->msgWnd = this->GetSafeHwnd();
+
 	if (0 >= _beginthreadex(NULL, 0, ThreadFun.ThreadAdress, this, 0, NULL))
 		return FALSE;
 	else
@@ -1951,6 +1975,11 @@ INT CCreateStartDlg::UnZip()
 	}
 	else if (WAIT_OBJECT_0 == res)
 	{
+		HANDLE hDrv = INVALID_HANDLE_VALUE;
+		//哪怕this->m_UnZipArg->desPath是长路径, this->GetDriveHandle()都可以获取该分区的句柄
+		this->GetDriveHandle(this->m_UnZipArg->desPath, &hDrv);
+		::FlushFileBuffers(hDrv);		//刷人缓存中的数据到U盘
+
 		Sleep(1000);
 		this->Free7z(NULL, TRUE);		//清除7z.exe
 		if (this->m_FormatState)	//需要格式化, 即是用  推荐选项--格式化再制作启动盘
@@ -2162,7 +2191,6 @@ INT CCreateStartDlg::CheckMbrPbr(
 	if (strcmp(name, TEXT("NTFS")) == 0)
 	{
 		res = PBR_NTFS;
-		goto FINAL;
 	}
 	else
 	{
@@ -2179,7 +2207,7 @@ INT CCreateStartDlg::CheckMbrPbr(
 	}
 
 	//如果有需要则, 设置分区的  文件系统type 和 大小size 参数
-	if (!list)
+	if (list)
 	{
 		DWORD partitionSize = 0;
 		if (PBR_NTFS == res)

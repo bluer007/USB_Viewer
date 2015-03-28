@@ -335,7 +335,7 @@ void CPartitionDlg::OnBnClickedOk()
 		temp.AppendFormat(TEXT("活动分区:  无 \n\n"));
 	}
 
-	temp.Append(TEXT("\n分区将清除U盘所有数据, 请做好备份后再确认!\n"));
+	temp.Append(TEXT("\n分区将清除U盘所有数据, 请做好 备份 后再确认!\n"));
 	//弹出确认框 供 用户最后确认
 	if (IDYES == AfxMessageBox(temp, MB_YESNO))
 	{
@@ -521,6 +521,9 @@ afx_msg LRESULT CPartitionDlg::OnMymsg(WPARAM wParam, LPARAM lParam)
 {
 	if (this->m_FormatState)
 	{
+		((CButton*)(this->GetDlgItem(IDOK)))->SetWindowText(TEXT("开始分区"));
+		m_CreateStartDlg->SetMyTimer(GetSafeHwnd(), TIMER_Partition, TIMER_Partition_time, TRUE);
+
 		this->m_USB_ViewerDlg->GetUSB(this, IDC_SELECT_USB);	//重新加载U盘
 		if (FORMAT_OK == wParam)
 		{

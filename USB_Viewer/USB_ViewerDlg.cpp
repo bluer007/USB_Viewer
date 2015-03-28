@@ -408,8 +408,8 @@ void CUSB_ViewerDlg::OnBnClickedOk()
 		AfxMessageBox(TEXT("出大事了, 操作失败啊~啊~啊~~ T_T"));
 	}
 	((CButton*)GetDlgItem(IDOK))->EnableWindow(TRUE);
-	this->GetUSB(this, IDC_COMBO1);
-	this->OnCbnSelchangeCombo1();
+	this->GetUSB(this, IDC_COMBO1);		// 获取当前所有U盘设备,并显示到组合框中
+	this->OnCbnSelchangeCombo1();		//每当选择的U盘改变时候, 自动更新 U盘的 分区列表显示
 
 
 /*

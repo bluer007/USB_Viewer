@@ -39,9 +39,9 @@ struct FormatPartitionArg
 
 struct UnZipArg
 {
-	CHAR desPath[MAX_PATH];
-	CHAR exePath[MAX_PATH];
-	CHAR isoPath[MAX_PATH];
-	HWND msgWnd;
+	CHAR desPath[MAX_PATH];		//必须填写, 解压目标地, 由CCreateStartDlg::OnBnClickedOk()填写
+	CHAR exePath[MAX_PATH];		//若省略, 表示解压工具在%TEMP%中, 也可以自己填写
+	CHAR isoPath[MAX_PATH];		//若省略, 表示镜像路径为/Data/CA.ISO ,也可以自己填写
+	HWND msgWnd;				//由于解压肯定要调用StartUnZip(), 所以由StartUnZip()来自动填写
 };
 
