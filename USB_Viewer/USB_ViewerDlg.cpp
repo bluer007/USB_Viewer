@@ -613,7 +613,7 @@ void CUSB_ViewerDlg::OnCbnSelchangeCombo1()
 		if (list[i].size < 1000)
 			sprintf_s(strSize, sizeof(strSize), "(第%d分区)   %dM", i + 1, list[i].size);
 		else
-			sprintf_s(strSize, sizeof(strSize), "(第%d分区)   %.1fG", i + 1, list[i].size / 1024.0);
+			sprintf_s(strSize, sizeof(strSize), "(第%d分区)   %.1fG", i + 1, (list[i].size / 1024.0));
 		nIndex = m_ListCtrl->InsertItem(i, strSize);
 		if (nIndex < 0)
 			goto FINAL;
@@ -1189,11 +1189,14 @@ INT CUSB_ViewerDlg::GetUSBInfo(
 	m_sector = new UCHAR[diskGeometry.BytesPerSector]();
 	if (!(m_sectorSize = m_CreateStartDlg.GetDiskSector(m_sector, &m_hDevice, NULL, NULL, &diskGeometry)))
 		goto FINAL;
-
+	//CheckMbrPbr()有可能返回false
 	INT type = m_CreateStartDlg.CheckMbrPbr(m_sector, m_sectorSize, &m_list);
 	if (NO_MBR_PBR == type)
 		goto FINAL;
-	else if (PBR_FAT32 == type || PBR_NTFS == type)
+	else if (PBR_FAT32 == type 
+		|| PBR_NTFS == type
+		|| PBR_FAT == type
+		|| PBR_EXFAT == type)
 	{
 		memcpy_s(&(*list)[0], sizeof((*list)[0]), &m_list, sizeof(m_list));
 		res = 1;	//即只找到一个分区
@@ -1290,6 +1293,7 @@ void CUSB_ViewerDlg::OnBnClickedCancel()
 	// TODO:  在此添加控件通知处理程序代码
 	CDialogEx::OnCancel();
 }
+
 
 
 void CUSB_ViewerDlg::OnPartition()

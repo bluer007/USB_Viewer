@@ -6,3 +6,10 @@
 ------About USB_Viewer----
 
 	this is a software that can make startup USB disk by one key , make multiple partitions, and switch to different partitions !
+	
+编程语言:
+	C++
+
+编译平台:
+	VS2015
+	

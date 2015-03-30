@@ -54,6 +54,7 @@ ON_MESSAGE(WM_MYMSG, &CCreateStartDlg::OnGetResult)
 ON_WM_DEVICECHANGE()		//用于接收设备(U盘)变动, 已更新界面的消息
 ON_WM_TIMER()
 ON_BN_CLICKED(IDCANCEL, &CCreateStartDlg::OnBnClickedCancel)
+ON_BN_CLICKED(IDC_BOOT, &CCreateStartDlg::OnBnClickedBoot)
 END_MESSAGE_MAP()
 
 
@@ -68,7 +69,6 @@ void CCreateStartDlg::OnBnClickedOk()
 	}
 
 	CString str;
-	CListCtrl *m_ListCtrl = ((CListCtrl*)GetDlgItem(IDC_LIST2));
 	CComboBox *m_CComboBox = ((CComboBox*)GetDlgItem(IDC_COMBO1));
 	m_CComboBox->GetWindowText(str);
 	INT pos = str.Find(":\\");	//因为U盘的显示格式是"G:\ 16G"
@@ -139,9 +139,9 @@ void CCreateStartDlg::OnBnClickedOk()
 
 			LARGE_INTEGER fat32size, ntfsSize;			//分别表示fat32, ntfs分区的大小
 			//保险起见, 分配比iso文件大50M的fat32分区
-			//iso低于fat32最低大小要求, 就分配最低大小+50的大小
+			//iso低于fat32最低大小要求, 就分配最低大小+100的大小
 			fileSize.QuadPart >= FAT32_SIZE_LIMIT ?			\
-				fat32size.QuadPart = fileSize.QuadPart + 50 : fat32size.QuadPart = FAT32_SIZE_LIMIT + 50;
+				fat32size.QuadPart = fileSize.QuadPart + 100 : fat32size.QuadPart = FAT32_SIZE_LIMIT + 100;
 				
 			usbSize.QuadPart = (usbSize.QuadPart / (1024 * 1024)) + 1;	//将U盘总大小转换为MB, +1是保险起见
 			ntfsSize.QuadPart = usbSize.QuadPart - fat32size.QuadPart;		//剩下的U盘容量分配给ntfs分区
@@ -208,7 +208,10 @@ void CCreateStartDlg::OnBnClickedOk()
 			}
 
 			INT sector_type = this->CheckMbrPbr(NULL, 0, NULL, &hDevice, NULL, NULL);
-			if (PBR_FAT32 == sector_type || PBR_NTFS == sector_type)
+			if (PBR_FAT32 == sector_type 
+				|| PBR_NTFS == sector_type
+				|| PBR_FAT == sector_type
+				|| PBR_EXFAT == sector_type)
 			{
 				CloseHandle(hDevice);
 				CloseHandle(hfile);
@@ -376,8 +379,10 @@ INT CCreateStartDlg::Partition(TCHAR* drive, INT num, Partition_Table* list, INT
 
 				dwBytes = 0;
 				SetFilePointer(hDrv, 0, NULL, FILE_BEGIN);
+				this->LockVolume(NULL, drive);
 				//写入新的分区表
 				WriteFile(hDrv, sector, dwSize, &dwBytes, NULL);
+				this->UnLockVolume();
 				if (dwBytes == dwSize)
 				{
 					//AfxMessageBox(_T(" U盘分区表设置成功!"));
@@ -387,11 +392,23 @@ INT CCreateStartDlg::Partition(TCHAR* drive, INT num, Partition_Table* list, INT
 						if (!this->InstallMBR(&hDrv, NULL, NULL, &diskGeometry))		//安装MBR扇区
 							goto ERROR2;
 					}
-
+					//清零分区表对应分区的引导扇区		初步解决了  RemountDrive()时候, 弹出window的格式化U盘窗口
+					this->LockVolume(NULL, drive);
+					INT deleteRes = this->DeletePartitionBootSector(&hDrv, num, sector, dwSize, &diskGeometry);	
+					this->UnLockVolume();
 					if (!this->RemountDrive(1, FALSE, drive))
 						goto ERROR2;
-					if (!this->DeletePartitionBootSector(&hDrv, num,sector, dwSize, &diskGeometry))		//清零分区表对应分区的引导扇区
-						goto ERROR2;
+					if (!deleteRes)
+					{
+						this->LockVolume(NULL, drive);
+						//清零分区表对应分区的引导扇区		初步解决了  RemountDrive()时候, 弹出window的格式化U盘窗口
+						if (!this->DeletePartitionBootSector(&hDrv, num, sector, dwSize, &diskGeometry))
+						{
+							this->UnLockVolume();
+							goto ERROR2;
+						}
+						this->UnLockVolume();
+					}
 
 					union
 					{
@@ -517,7 +534,43 @@ INT __stdcall CCreateStartDlg::FormatPartition()
 		Sleep(1000);
 		
 		str.Format("%c: /q /fs:%s /y", *this->m_FormatPartitionArg->drive, this->m_FormatPartitionArg->list[i].type);
-		//str = "";
+		
+		HANDLE hProcess = INVALID_HANDLE_VALUE;
+		int res = this->ShellExe(TEXT("Open"), TEXT("format.com"), TEXT("%system32%"), 
+				str.GetBuffer(), SW_HIDE, 40000, &hProcess);		//40秒 == 40000ms 	该函数是阻塞型函数
+		
+		if (WAIT_TIMEOUT == res || WAIT_FAILED == res)
+		{
+			//也可以直接关闭这个进程，只要保留sei.hProcess就行 
+			TerminateProcess(hProcess, 0);
+			goto ERROR2;
+		}
+		else if (WAIT_OBJECT_0 == res)
+		{
+			//AfxMessageBox("格式化完,即将更新");
+			Sleep(1000);
+			//if (!this->BackupPartitionBootSector(&m_hDrv, i + 1, &m_diskGeometry))
+			//goto ERROR2;
+
+			if (this->ChangePartitionTable(&m_hDrv, this->m_FormatPartitionArg->drive, NULL, order[i]))		//采取更改分区表项目顺序做法, 
+			{
+				if (!this->DismountVolume(this->m_FormatPartitionArg->drive))
+					goto ERROR2;
+				//CloseHandle(m_hDrv);
+				//if (!this->GetDiskHandle(this->m_FormatPartitionArg->drive, NULL, &m_hDrv))
+				//	goto ERROR1;
+				continue;
+			}
+			else
+				goto ERROR2;
+		}
+		else
+		{
+			AfxMessageBox("WaitForSingleObject 新返回值");
+			goto ERROR2;
+		}
+
+/*
 		SHELLEXECUTEINFO sei;
 		// 启动进程 
 		ZeroMemory(&sei, sizeof(SHELLEXECUTEINFO));
@@ -536,36 +589,7 @@ INT __stdcall CCreateStartDlg::FormatPartition()
 		ShellExecuteEx(&sei);
 		//   加入下面这句就是等待该进程结束 
 		int res = WaitForSingleObject(sei.hProcess, 40000);		//40秒 == 40000ms 
-		if (WAIT_TIMEOUT == res || WAIT_FAILED == res)
-		{
-			//也可以直接关闭这个进程，只要保留sei.hProcess就行 
-			TerminateProcess(sei.hProcess, 0);
-			goto ERROR2;
-		}
-		else if (WAIT_OBJECT_0 == res)
-		{
-			//AfxMessageBox("格式化完,即将更新");
-			Sleep(1000);
-			//if (!this->BackupPartitionBootSector(&m_hDrv, i + 1, &m_diskGeometry))
-				//goto ERROR2;
-			
-			if (this->ChangePartitionTable(&m_hDrv, this->m_FormatPartitionArg->drive, NULL, order[i]))		//采取更改分区表项目顺序做法, 
-			{
-				if (!this->DismountVolume(this->m_FormatPartitionArg->drive))
-					goto ERROR2;
-				//CloseHandle(m_hDrv);
-				//if (!this->GetDiskHandle(this->m_FormatPartitionArg->drive, NULL, &m_hDrv))
-				//	goto ERROR1;
-				continue;
-			}
-			else
-				goto ERROR2;
-		}
-		else
-		{
-			AfxMessageBox("WaitForSingleObject 新返回值");
-			goto ERROR2;
-		}
+	*/
 	}
 	//AfxMessageBox("即将恢复引导扇区");
 	//if (!this->RestorePartitionBootSector(&m_hDrv, this->m_FormatPartitionArg->num, &m_diskGeometry))
@@ -759,10 +783,13 @@ INT CCreateStartDlg::GetPartitionBootSector(UCHAR sector[], HANDLE *hDevice, INT
 	if (!(sector_size = this->GetDiskSector(sector, hDevice, NULL, NULL, diskGeometry)))
 		return FALSE;
 	
-	INT sector_type = this->CheckMbrPbr(sector, sector_size, NULL);
-	if (NO_MBR_PBR == sector_type)
+	INT sector_type = this->CheckMbrPbr(sector, sector_size, NULL);	//有可能返回false
+	if (NO_MBR_PBR == sector_type || !sector_type)
 		return FALSE;
-	else if (PBR_NTFS == sector_type || PBR_FAT32 == sector_type)
+	else if (PBR_NTFS == sector_type 
+		|| PBR_FAT32 == sector_type
+		|| PBR_FAT == sector_type
+		|| PBR_EXFAT == sector_type)
 	{
 		if (1 == partitionNum)	//如果pbr是第一个扇区, 则肯定U盘只有一个分区,也就是第一个分区
 			return sector_size;
@@ -824,21 +851,42 @@ INT CCreateStartDlg::GetDiskSector(UCHAR sector[], HANDLE *hDevice, LPCSTR drive
 
 }
 
-INT CCreateStartDlg::GetOnePartitionInfo(Partition_Table *list, HANDLE *hDevice, INT partitionNum, DISK_GEOMETRY* diskGeometry)
+INT CCreateStartDlg::GetOnePartitionInfo(
+	Partition_Table *list, 
+	HANDLE *hDevice, 
+	INT partitionNum, 
+	DISK_GEOMETRY* diskGeometry, 
+	UCHAR bootSector[] /*= NULL*/, INT sector_size /*= 0*/)
 {
-	//partitionNum为 分区表第几项 第, 即第几个分区, 如1, 2,3 4
-	if (!list || !hDevice || partitionNum > 4 || partitionNum <= 0 || !diskGeometry)
-		return FALSE;
+	//partitionNum为 分区表第几项 , 即第几个分区(无论是否有效), 如1, 2,3 4
+	//若bootSector有效,则只能是文件系统的引导扇区,本函数将分析该扇区
+	//且hDevice优先级比bootSector高
 
 	INT res = FALSE;
-	UCHAR* sector = new UCHAR[diskGeometry->BytesPerSector]();
-	if (!this->GetPartitionBootSector(sector, hDevice, partitionNum, diskGeometry))
-		goto FINAL;
+	UCHAR* sector = NULL;
+	if (!list || !hDevice || partitionNum > 4 || partitionNum <= 0 || !diskGeometry)
+	{
+		if (!bootSector || sector_size <= 0)
+			return FALSE;
+		else
+		{
+			sector = bootSector;
+		}
+	}
+	else
+	{
+		sector = new UCHAR[diskGeometry->BytesPerSector]();
+		if (!this->GetPartitionBootSector(sector, hDevice, partitionNum, diskGeometry))
+			goto FINAL;
+	}
+
 	
 	enum TYPE
 	{
 		NTFS,
 		FAT32,
+		FAT16,
+		exFAT,
 		UNKNOW
 	};
 	TYPE type = UNKNOW;
@@ -857,7 +905,22 @@ INT CCreateStartDlg::GetOnePartitionInfo(Partition_Table *list, HANDLE *hDevice,
 		if (strcmp(name, TEXT("FAT32")) == 0)
 			type = FAT32;
 		else
-			goto FINAL;		//type = UNKNOW;
+		{
+			ZeroMemory(name, sizeof(name));
+			memcpy_s(name, sizeof(name), &sector[54], 5);		//sector是FAT16的File system标志位("FAT16")
+			if (strcmp(name, TEXT("FAT16")) == 0)
+				type = FAT16;
+			else
+			{
+				ZeroMemory(name, sizeof(name));
+				memcpy_s(name, sizeof(name), &sector[3], 5);		//sector是exFAT的File system标志位("EXFAT")
+				if (strcmp(name, TEXT("EXFAT")) == 0)
+					type = exFAT;
+				else
+					goto FINAL;		//type = UNKNOW;
+			}
+				
+		}
 	}
 
 	//设置分区的  文件系统type 和 大小size 参数
@@ -882,15 +945,41 @@ INT CCreateStartDlg::GetOnePartitionInfo(Partition_Table *list, HANDLE *hDevice,
 		strcpy_s(list->type, sizeof(list->type), TEXT("FAT32"));
 		list->size = ULONG64((ULONG64)partitionSize * (ULONG64)diskGeometry->BytesPerSector / (1024.0 * 1024.0));
 	}
-	else
-		goto FINAL;
+	else if (FAT16 == type)
+	{
+		memcpy_s(&partitionSize, sizeof(DWORD), &sector[32], 4);		//fat16(fat)引导扇区中 分区总共扇区 标志位
+		if (partitionSize <= 0)
+			goto FINAL;
+
+		strcpy_s(list->type, sizeof(list->type), TEXT("FAT"));
+		list->size = ULONG64((ULONG64)partitionSize * (ULONG64)diskGeometry->BytesPerSector / (1024.0 * 1024.0));
+	}
+	else if (exFAT == type)
+	{
+		//分区的总簌数目标志位
+		memcpy_s(&partitionSize, sizeof(DWORD), &sector[92], 4);
+		//每扇区大小的字节数的2的乘方形式, 一般是9, 即2^9=512字节, 最大是12
+		UCHAR sectorSize = sector[108];
+		//每簌的扇区数也是2的乘方形式, 最大是25, 即32M, 本机上测试是06, 即2^6=64
+		UCHAR sectorInCluster = sector[109];
+		//partitionSize *= (2 ^ (sectorSize + sectorInCluster));
+		if (sectorInCluster <= 0|| sectorSize <= 0|| partitionSize <= 0)
+			goto FINAL;
+		strcpy_s(list->type, sizeof(list->type), TEXT("exFAT"));
+		list->size = ULONG64((ULONG64)partitionSize * (ULONG64)(pow(2, (sectorSize + sectorInCluster))) / (1024.0 * 1024.0));
+	}
+	else	
+		goto FINAL;		//type == UNKNOW
 	
 	res = TRUE;
 	goto FINAL;
 
 FINAL:
-	if (sector)
-		delete[] sector;
+	if (!bootSector)
+	{
+		if (sector)
+			delete[] sector;
+	}
 	return res;
 }
 
@@ -973,7 +1062,7 @@ INT CCreateStartDlg::SetActivePartitionNum(INT activePartitionNum, HANDLE *hDevi
 	if (!(sector_size = this->GetDiskSector(sector, &m_hDevice, NULL, NULL, &diskGeometry)))
 		goto FINAL;
 
-	//只有存在MBR扇区的U盘才可以设置活动分区
+	//只有存在MBR扇区的U盘才可以设置活动分区		CheckMbrPbr()有可能返回false
 	if (MBR != this->CheckMbrPbr(sector, sector_size, NULL, NULL, NULL, NULL))
 		goto FINAL;
 
@@ -1140,8 +1229,9 @@ INT CCreateStartDlg::ChangePartitionTable(HANDLE *hDisk, LPCSTR drive, LPCSTR di
 
 				dwBytes = 0;
 				SetFilePointer(hDrv, 0, NULL, FILE_BEGIN);
-
+				this->LockVolume(NULL, drive);
 				WriteFile(hDrv, sector, dwSize, &dwBytes, NULL);
+				this->UnLockVolume();
 				if (dwBytes == dwSize)
 				{
 					delete[] sector;
@@ -1321,8 +1411,7 @@ INT CCreateStartDlg::DeletePartitionBootSector(HANDLE *hDevice, INT num, UCHAR s
 
 		offset.QuadPart = ((ULONG64)sys_start_pos[i]) * ((ULONG64)diskGeometry->BytesPerSector);
 		// 从打开的文件（磁盘）中移动文件指针。offset.LowPart低32位为移动字节数
-		
-		DWORD aa = SetFilePointer(*hDevice, offset.LowPart, &offset.HighPart, FILE_BEGIN);
+		SetFilePointer(*hDevice, offset.LowPart, &offset.HighPart, FILE_BEGIN);
 		::WriteFile(*hDevice, newBootSector, diskGeometry->BytesPerSector, &dwbytes, NULL);
 		if (diskGeometry->BytesPerSector != dwbytes)
 		{
@@ -1632,7 +1721,9 @@ INT CCreateStartDlg::InstallMBR(HANDLE *hDevice, LPCSTR drive, LPCSTR disk, DISK
 	memcpy_s(&mbr_data[sizeof(mbr_data) - 66], 66, &sector[m_diskGeometry.BytesPerSector - 66], 66);
 	DWORD dwBytes = 0;
 	SetFilePointer(m_hDevice, 0, 0, FILE_BEGIN);
+	this->LockVolume(NULL, drive);
 	WriteFile(m_hDevice, mbr_data, (sizeof(mbr_data) / sizeof(mbr_data[0])), &dwBytes, NULL);
+	this->UnLockVolume();
 	if (dwBytes == m_diskGeometry.BytesPerSector)
 	{
 		if (!hDevice)
@@ -1725,6 +1816,14 @@ INT CCreateStartDlg::InstallPBR(
 		pbr_data = pbr_fat32_data;
 		pbr_data_size = sizeof(pbr_fat32_data);
 	}
+	else if (strcmp(list.type, TEXT("fat")) == 0	\
+		|| strcmp(list.type, TEXT("FAT")) == 0	\
+		|| strcmp(list.type, TEXT("exFAT")) == 0	\
+		|| strcmp(list.type, TEXT("EXFAT")) == 0)
+	{
+		AfxMessageBox(TEXT("抱歉丫~~~\n暂时还不支持fat和exfat文件系统\n暂时只支持fat32和ntfs文件系统\n建议选用推荐选项--格式化后制作启动盘"));
+		goto ERROR1;
+	}
 	else
 		goto ERROR1;
 
@@ -1750,7 +1849,7 @@ INT CCreateStartDlg::InstallPBR(
 			goto ERROR1;
 
 		DWORD sys_start_pos = 0;
-		//获取系统当前显示的分区的开始位置
+		//获取活动分区的开始位置
 		memcpy_s(&sys_start_pos, sizeof(sys_start_pos), &sector[sector_size - 66 + 8 + (m_ActivePartitionNum - 1) * 16], 4);
 		if (sys_start_pos <= 0)
 			goto ERROR1;
@@ -1759,8 +1858,10 @@ INT CCreateStartDlg::InstallPBR(
 		SetFilePointer(m_hDevice, offset.LowPart, &offset.HighPart, FILE_BEGIN);
 	}
 
-	//写入系统当前显示的分区的引导扇区
+	this->LockVolume(NULL, drive);
+	//写入活动分区的引导扇区
 	WriteFile(m_hDevice, pbr_data, pbr_data_size, &dwBytes, NULL);
+	this->UnLockVolume();
 	if (dwBytes == dwBytes)
 	{
 		if (!hDevice)
@@ -1771,8 +1872,6 @@ INT CCreateStartDlg::InstallPBR(
 	}
 	else
 	{
-		INT II = GetLastError();
-		II += 0;
 		goto ERROR1;
 	}
 
@@ -1808,6 +1907,26 @@ INT CCreateStartDlg::LockVolume(HANDLE *hDisk, LPCSTR drive /*= NULL*/)
 		NULL, 0, NULL, 0, 
 		&dwBytesReturned, NULL);
 	return res;
+}
+
+INT CCreateStartDlg::DeleteFolder(LPCSTR path)
+{
+	//删除文件,如G:\[BOOT], 则把[BOOT]文件夹及里面的文件都删除
+	CHAR m_path[MAX_PATH] = {0};
+	strcpy_s(m_path, MAX_PATH, TEXT(path));
+
+	SHFILEOPSTRUCT FileOp;
+	ZeroMemory((void*)&FileOp, sizeof(SHFILEOPSTRUCT));
+
+	FileOp.fFlags = FOF_NOCONFIRMATION | FOF_NOERRORUI;
+	FileOp.hNameMappings = NULL;
+	FileOp.hwnd = NULL;
+	FileOp.lpszProgressTitle = NULL;
+	FileOp.pFrom = m_path;
+	FileOp.pTo = NULL;
+	FileOp.wFunc = FO_DELETE;
+
+	return  SHFileOperation(&FileOp) == 0;
 }
 
 INT CCreateStartDlg::UnLockVolume()
@@ -1874,6 +1993,41 @@ INT CCreateStartDlg::GetDriveHandle(LPCSTR drive, HANDLE *hDrive)
 	return *hDrive != INVALID_HANDLE_VALUE ? TRUE : FALSE;
 }
 
+INT CCreateStartDlg::GetDiskNumber(LPCSTR drive, HANDLE *hDrive, INT* diskNumber)
+{
+	HANDLE m_hDrive = INVALID_HANDLE_VALUE;
+	if (drive)
+	{
+		if (!this->GetDriveHandle(drive, &m_hDrive))
+			return FALSE;
+	}
+	else if (hDrive)
+	{
+		m_hDrive = *hDrive;
+	}
+	else
+		return FALSE;
+
+	VOLUME_DISK_EXTENTS vde;
+	DWORD dwBytes = 0;
+	if (!DeviceIoControl(m_hDrive,
+		IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
+		NULL, 0,
+		&vde, sizeof(VOLUME_DISK_EXTENTS),
+		&dwBytes, NULL))
+		return FALSE;
+	
+	if (!hDrive)
+		CloseHandle(m_hDrive);
+
+	if (diskNumber)
+		*diskNumber = vde.Extents->DiskNumber;
+	else
+		return FALSE;
+
+	return TRUE;
+}
+
 INT CCreateStartDlg::StartUnZip()
 {
 	union
@@ -1916,7 +2070,7 @@ INT CCreateStartDlg::UnZip()
 			goto ERROR2;
 	}
 
-	if (!this->Free7z(NULL, FALSE))		//释放7z
+	if (!this->FreeFile(TEXT("7z.exe"), TEXT("UNZIP"), IDR_7z, NULL, FALSE))		//释放7z
 		goto ERROR1;
 
 	/*struct UnZipArg
@@ -1950,7 +2104,45 @@ INT CCreateStartDlg::UnZip()
 	}
 
 	sprintf_s(Parameters, _T("x \"%s\" -o\"%s\" -y"), m_isoPath, this->m_UnZipArg->desPath);		//Parameters参数
-	
+
+	HANDLE hProcess = INVALID_HANDLE_VALUE;
+	int res = this->ShellExe(TEXT("Open"), TEXT("7z.exe"), TEXT("%temp%"),
+		Parameters, SW_HIDE, 1800000, &hProcess);		//30min == 1800s == 1800000ms 	该函数是阻塞型函数
+
+	if (WAIT_TIMEOUT == res || WAIT_FAILED == res)
+	{
+		//也可以直接关闭这个进程，只要保留sei.hProcess就行 
+		TerminateProcess(hProcess, 0);
+		goto ERROR1;
+	}
+	else if (WAIT_OBJECT_0 == res)
+	{
+		HANDLE hDrv = INVALID_HANDLE_VALUE;
+		//哪怕this->m_UnZipArg->desPath是长路径, this->GetDriveHandle()都可以获取该分区的句柄
+		this->GetDriveHandle(this->m_UnZipArg->desPath, &hDrv);
+
+		CString boolFolder(this->m_UnZipArg->desPath);
+		if (boolFolder.Right(1).CompareNoCase(TEXT("\\")) == 0)
+			boolFolder.Append(TEXT("[BOOT]"));
+		else
+			boolFolder.Append(TEXT("\\[BOOT]"));
+		this->DeleteFolder(boolFolder.GetBuffer());
+
+		::FlushFileBuffers(hDrv);		//刷人缓存中的数据到U盘
+		Sleep(2000);
+		this->FreeFile(TEXT("7z.exe"), TEXT("UNZIP"), IDR_7z, NULL, TRUE);		//清除7z.exe
+		if (this->m_FormatState)	//需要格式化, 即是用  推荐选项--格式化再制作启动盘
+			this->RemountDrive(2, TRUE);	//还原U盘分区设置
+		::PostMessage(this->m_UnZipArg->msgWnd, WM_MYMSG, UNZIP_OK, 0);
+		return TRUE;
+	}
+	else
+	{
+		AfxMessageBox("UnZip()等待到未知参数?");
+		goto ERROR1;
+	}
+/*
+
 	SHELLEXECUTEINFO sei;
 	// 启动进程 
 	ZeroMemory(&sei, sizeof(SHELLEXECUTEINFO));
@@ -1966,32 +2158,8 @@ INT CCreateStartDlg::UnZip()
 	sei.hInstApp = NULL;
 	ShellExecuteEx(&sei);
 	//   加入下面这句就是等待该进程结束 
-	int res = WaitForSingleObject(sei.hProcess, 1800000);	//30min == 1800s == 1800000ms
-	if (WAIT_TIMEOUT == res || WAIT_FAILED == res)
-	{
-		//也可以直接关闭这个进程，只要保留sei.hProcess就行 
-		TerminateProcess(sei.hProcess, 0);
-		goto ERROR1;
-	}
-	else if (WAIT_OBJECT_0 == res)
-	{
-		HANDLE hDrv = INVALID_HANDLE_VALUE;
-		//哪怕this->m_UnZipArg->desPath是长路径, this->GetDriveHandle()都可以获取该分区的句柄
-		this->GetDriveHandle(this->m_UnZipArg->desPath, &hDrv);
-		::FlushFileBuffers(hDrv);		//刷人缓存中的数据到U盘
-
-		Sleep(1000);
-		this->Free7z(NULL, TRUE);		//清除7z.exe
-		if (this->m_FormatState)	//需要格式化, 即是用  推荐选项--格式化再制作启动盘
-			this->RemountDrive(2, TRUE);	//还原U盘分区设置
-		::PostMessage(this->m_UnZipArg->msgWnd, WM_MYMSG, UNZIP_OK, 0);
-		return TRUE;
-	}
-	else
-	{
-		AfxMessageBox("UnZip()等待到未知参数?");
-		goto ERROR1;
-	}
+	int res = WaitForSingleObject(sei.hProcess, 1800000);	//30min == 1800s == 1800000ms*/
+	
 
 
 ERROR1:
@@ -2002,15 +2170,17 @@ ERROR1:
 	//}
 
 ERROR2:
-	this->Free7z(NULL, TRUE);		//清除7z.exe
+	this->FreeFile(TEXT("7z.exe"), TEXT("UNZIP"), IDR_7z, NULL, TRUE);		//清除7z.exe
 	::PostMessage(this->m_UnZipArg->msgWnd, WM_MYMSG, UNZIP_ERROR, 0);
 	return FALSE;
 }
 
-INT CCreateStartDlg::Free7z(LPCSTR path /*= NULL*/, BOOL isDelete /*= FALSE*/)
+/*
+INT CCreateStartDlg::Free7z(LPCSTR path / *= NULL* /, BOOL isDelete / *= FALSE* /)
 {
 	//本函数有两个作用: 释放7z.exe 和 删除7z.exe
 	//path == "C:\Users\hello\LOCALS~1\TMP\" 等(需要\后缀)
+	//若path为null, 则自动填写为%TMP%
 	TCHAR m_path[MAX_PATH] = { 0 }; 
 	if (path)
 	{
@@ -2043,7 +2213,121 @@ INT CCreateStartDlg::Free7z(LPCSTR path /*= NULL*/, BOOL isDelete /*= FALSE*/)
 		return TRUE;
 	else
 		return FALSE;
+}*/
+
+INT CCreateStartDlg::ShellExe(
+	CHAR* operate, CHAR* file, CHAR* path, 
+	CHAR* parameters, INT show, INT timeout, 
+	_Out_ HANDLE* hProcess)
+{
+	//该函数是阻塞型函数
+	CHAR m_path[MAX_PATH + 1] = {0};
+	if (!strcmp(path, TEXT("%temp%"))
+		|| !strcmp(path, TEXT("%tmp%")))
+	{
+		GetTempPath(MAX_PATH, m_path);			//返回 %TMP% 目录, 如C:\Users\hello\LOCALS~1\TMP
+	}
+	else if (!strcmp(path, TEXT("system32")))
+	{
+		GetWindowsDirectory(m_path, MAX_PATH + 1);		//取得windows目录,如C:\Windows
+		strcat_s(m_path, MAX_PATH + 1, "\\System32");
+	}
+	else
+	{
+		strcpy_s(m_path, MAX_PATH + 1, path);
+	}
+
+	SHELLEXECUTEINFO sei;
+	// 启动进程 
+	ZeroMemory(&sei, sizeof(SHELLEXECUTEINFO));
+	sei.cbSize = sizeof(SHELLEXECUTEINFO);
+	sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+	sei.hwnd = NULL;
+	sei.lpVerb = TEXT(operate);
+	sei.lpFile = TEXT(file);
+	sei.lpParameters = parameters;
+	sei.lpDirectory = m_path;
+	sei.nShow = show;		//SW_HIDE;SW_NORMAL
+	sei.hInstApp = NULL;
+	ShellExecuteEx(&sei);
+	//   加入下面这句就是等待该进程结束 
+	*hProcess = sei.hProcess;
+	return WaitForSingleObject(sei.hProcess, timeout);
 }
+
+INT CCreateStartDlg::FreeFile(CHAR* outName, CHAR* resType, INT resID, LPCSTR path /*= NULL*/, BOOL isDelete /*= FALSE*/)
+{
+	//本函数有两个作用: 释放resType类的resID到path下的outName文件中 和 删除path下的outName文件
+	//path == "C:\Users\hello\LOCALS~1\TMP\" 等(需要\后缀)
+	//若path为null, 则自动填写为%TMP%
+
+	TCHAR m_path[MAX_PATH] = { 0 };
+	if (path)
+	{
+		strcpy_s(m_path, MAX_PATH, path);
+	}
+	else
+	{
+		GetTempPath(MAX_PATH, m_path);		//返回 %TMP% 目录, 如C:\Users\hello\LOCALS~1\TMP
+	}
+	strcat_s(m_path, MAX_PATH, TEXT(outName));
+
+	if (isDelete)
+		return ::DeleteFile(m_path);	//删除文件
+
+	HMODULE hMod = GetModuleHandle(NULL);
+	HRSRC hRsc = FindResource(hMod, MAKEINTRESOURCE(resID), TEXT(resType));
+	HGLOBAL hGlobal = LoadResource(hMod, hRsc);
+	LPCTSTR pfile = (LPCTSTR)LockResource(hGlobal);
+	DWORD fileSize = SizeofResource(hMod, hRsc);
+
+	HANDLE hfile = CreateFile(m_path,
+		GENERIC_READ | GENERIC_WRITE,
+		FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+		NULL, CREATE_ALWAYS, 0, NULL);
+
+	DWORD dwBytes = 0;
+	WriteFile(hfile, pfile, fileSize, &dwBytes, NULL);		//释放到 目标文件夹
+	CloseHandle(hfile);
+	return dwBytes == fileSize;
+}
+/*
+
+INT CCreateStartDlg::FreeQemu(LPCSTR path = NULL, BOOL isDelete = FALSE)
+{
+	//本函数有两个作用: 释放MyQemu.exe 和 删除MyQemu.exe
+	//path == "C:\Users\hello\LOCALS~1\TMP\" 等(需要\后缀)
+	//若path为null, 则自动填写为%TMP%
+	TCHAR m_path[MAX_PATH] = { 0 };
+	if (path)
+	{
+		strcpy_s(m_path, MAX_PATH, path);
+	}
+	else
+	{
+		GetTempPath(MAX_PATH, m_path);		//返回 %TMP% 目录, 如C:\Users\hello\LOCALS~1\TMP
+	}
+	strcat_s(m_path, MAX_PATH, _T("MyQemu.exe"));
+
+	if (isDelete)
+		return ::DeleteFile(m_path);	//删除MyQemu.exe
+
+	HMODULE hMod = GetModuleHandle(NULL);
+	HRSRC hRsc = FindResource(hMod, MAKEINTRESOURCE(IDR_Qemu), _T("UNZIP"));
+	HGLOBAL hGlobal = LoadResource(hMod, hRsc);
+	LPCTSTR h7z = (LPCTSTR)LockResource(hGlobal);
+	DWORD fileSize = SizeofResource(hMod, hRsc);
+
+	HANDLE hfile = CreateFile(m_path,
+		GENERIC_READ | GENERIC_WRITE,
+		FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+		NULL, CREATE_ALWAYS, 0, NULL);
+
+	DWORD dwBytes = 0;
+	WriteFile(hfile, h7z, fileSize, &dwBytes, NULL);		//释放MyQemu.exe到 临时文件夹
+	CloseHandle(hfile);
+	return dwBytes == fileSize;
+}*/
 
 INT CCreateStartDlg::RemountDrive(INT remountNum /*= 2*/, BOOL isRestore /*= FALSE*/, LPCSTR desPath /*= NULL*/)
 {
@@ -2133,6 +2417,7 @@ INT CCreateStartDlg::CheckMbrPbr(
 	HANDLE m_hDevice = INVALID_HANDLE_VALUE;
 	DISK_GEOMETRY diskGeometry;
 	UCHAR* m_sector = NULL;
+	Partition_Table temp_list = { 0 };
 	if (sector_size > 0 && sector)
 	{
 		m_sector = sector;
@@ -2180,11 +2465,35 @@ INT CCreateStartDlg::CheckMbrPbr(
 	}
 	if (isMBR)
 	{
-		res = MBR;
+		res = MBR;		//是MBR扇区
+		goto FINAL;
+	}
+	
+	//以下是 只有pbr扇区情况
+	if (!this->GetOnePartitionInfo(&temp_list, NULL, NULL, &diskGeometry, m_sector, sector_size))
+	{
+		//GetOnePartitionInfo()返回false, 即m_sector也不是pbr
+		res = NO_MBR_PBR;
 		goto FINAL;
 	}
 
-	//检查是否为NTFS_PBR
+	if (strcmp(temp_list.type, TEXT("NTFS")) == 0)
+		res = PBR_NTFS;
+	else if (strcmp(temp_list.type, TEXT("FAT32")) == 0)
+		res = PBR_FAT32;
+	else if (strcmp(temp_list.type, TEXT("FAT")) == 0)
+		res = PBR_FAT;
+	else if (strcmp(temp_list.type, TEXT("exFAT")) == 0)
+		res = PBR_EXFAT;
+	else
+	{
+		res = NO_MBR_PBR;
+		goto FINAL;
+	}
+	if (list)
+		memcpy_s(list, sizeof(temp_list), &temp_list, sizeof(temp_list));
+	goto FINAL;
+	/*//检查是否为NTFS_PBR
 	CHAR name[6] = { 0 };
 	memcpy_s(name, sizeof(name), &m_sector[3], 4);		//m_sector[3,4,5,6]是NTFS的File system ID ("NTFS")
 	//判断分区的文件系统
@@ -2245,7 +2554,7 @@ INT CCreateStartDlg::CheckMbrPbr(
 		}
 	}
 	goto FINAL;		//可能是PBR_FAT32 或者 PBR_NTFS
-
+	*/
 
 FINAL:
 	if (!hDevice)
@@ -2305,4 +2614,109 @@ void CCreateStartDlg::OnBnClickedCancel()
 	}
 
 	CDialogEx::OnCancel();
+}
+
+
+void CCreateStartDlg::OnBnClickedBoot()
+{
+	if (this->m_FormatState || this->m_needUnzip)
+	{
+		AfxMessageBox(TEXT("制作启动盘ing, 请稍后"));
+		return;
+	}
+	CString drive;
+	((CComboBox*)GetDlgItem(IDC_COMBO1))->GetWindowText(drive);
+	//因为U盘的显示格式是"G:\ 16G"
+	if (drive.Find(":\\") == -1)
+	{
+		AfxMessageBox(TEXT("先选择U盘才能进行操作哈"));
+		return;		//针对  空白的选项
+	}
+
+	union
+	{
+		INT(__stdcall CCreateStartDlg::*BootPE)();
+		unsigned int(__stdcall* ThreadAdress)(void*);
+	}ThreadFun;
+	ThreadFun.BootPE = &CCreateStartDlg::BootPE;
+
+	if (0 >= _beginthreadex(NULL, 0, ThreadFun.ThreadAdress, this, 0, NULL))
+	{
+		AfxMessageBox(TEXT("模拟器好像遇到点问题哦 T_T\n\n不好意思啊, 我要回去修理了"));
+		return;
+	}
+}
+
+INT __stdcall CCreateStartDlg::BootPE()
+{
+	CString drive;
+	((CComboBox*)GetDlgItem(IDC_COMBO1))->GetWindowText(drive);
+	INT pos = drive.Find(":\\");	//因为U盘的显示格式是"G:\ 16G"
+	if (pos == -1)
+	{
+		AfxMessageBox(TEXT("先选择U盘才能进行操作哈"));
+		return FALSE;		//针对  空白的选项
+	}
+	drive = drive.Mid(pos - 1, 2);		//现在str表示"G:"
+
+	AfxMessageBox(TEXT("提醒: 【Ctrl + Alt】可让鼠标从模拟器中返回到真实系统哈^_^\n\n模拟器只是用来验证能否引导U盘的系统\n\n若运行模拟器里的工具, 可能会导致真实系统的不稳定哟~~~"));
+
+	LPCSTR fileName[] =
+	{	//MyQemu解压出来的所有文件
+		"MyQemu.exe",
+		"qemu.exe",
+		"bios.bin",
+		"libusb0.dll",
+		"libz-1.dll",
+		"SDL.dll",
+		"vgabios.bin"
+	};
+
+	CString str(TEXT("x -y"));		//作为参数, 表示 无条件覆盖原文件的解压
+	HANDLE hProcess = INVALID_HANDLE_VALUE;
+	INT diskNumber = -1;
+
+	if (!this->GetDiskNumber(drive.GetBuffer(), NULL, &diskNumber))
+		goto ERROR1;
+
+	if (!this->FreeFile(TEXT("MyQemu.exe"), TEXT("UNZIP"), IDR_Qemu, NULL, FALSE))		//释放MyQemu.exe
+		goto ERROR1;
+
+	int res = this->ShellExe(TEXT("Open"), TEXT("MyQemu.exe"), TEXT("%temp%"),
+		str.GetBuffer(), SW_HIDE, 5000, &hProcess);		//5s == 5000ms 现在先用来解压	该函数是阻塞型函数
+
+														//确认qemu参数
+	str.Format(TEXT("-L . -boot c -m 300 -hda //./PhysicalDrive%d -localtime -vga std -snapshot"), diskNumber);
+
+	res = this->ShellExe(TEXT("Open"), TEXT("qemu.exe"), TEXT("%temp%"),
+		str.GetBuffer(), SW_HIDE, 1800000, &hProcess);		//30min == 1800s == 1800000ms 现在开始运行模拟器	该函数是阻塞型函数
+	if (WAIT_OBJECT_0 == res)
+	{
+		for (INT i = sizeof(fileName) / sizeof(fileName[0]); i; )
+		{
+			//清理文件
+			this->FreeFile((CHAR*)(fileName[--i]), NULL, NULL, NULL, TRUE);
+		}
+		return TRUE;
+	}
+	else if (WAIT_TIMEOUT == res || WAIT_FAILED == res)
+	{
+		//也可以直接关闭这个进程，只要保留sei.hProcess就行 
+		TerminateProcess(hProcess, 0);
+		goto ERROR1;
+	}
+	else
+	{
+		goto ERROR1;
+	}
+
+
+ERROR1:
+	for (INT i = sizeof(fileName) / sizeof(fileName[0]); i; )
+	{
+		//清理文件
+		this->FreeFile((CHAR*)(fileName[--i]), NULL, NULL, NULL, TRUE);
+	}
+	AfxMessageBox(TEXT("模拟器好像遇到点问题哦 T_T\n\n不好意思啊, 我要回去修理了"));
+	return FALSE;
 }

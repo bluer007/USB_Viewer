@@ -133,11 +133,14 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="7z.exe" />
+    <None Include="MyQemu.exe" />
     <None Include="res\unzip1.bin" />
     <None Include="res\unzip2.bin" />
     <None Include="res\USB_Viewer.rc2" />
   </ItemGroup>
   <ItemGroup>
+    <Image Include="res\about.ico" />
+    <Image Include="res\about.png" />
     <Image Include="res\ico.ico" />
     <Image Include="res\ico.png" />
     <Image Include="res\icon1.ico" />

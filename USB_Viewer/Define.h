@@ -14,6 +14,8 @@ enum
 	MBR,
 	PBR_NTFS,
 	PBR_FAT32,
+	PBR_FAT,
+	PBR_EXFAT,
 
 	NO_Active_Partition,		//用于CCreateStartDlg::GetActivePartitionNum()函数, 表示找不到活动分区
 };

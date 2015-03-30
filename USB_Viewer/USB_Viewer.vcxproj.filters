@@ -79,6 +79,7 @@
       <Filter>资源文件</Filter>
     </None>
     <None Include="7z.exe" />
+    <None Include="MyQemu.exe" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="res\USB_Viewer.ico">
@@ -91,6 +92,12 @@
       <Filter>资源文件</Filter>
     </Image>
     <Image Include="res\ico.ico">
+      <Filter>资源文件</Filter>
+    </Image>
+    <Image Include="res\about.png">
+      <Filter>资源文件</Filter>
+    </Image>
+    <Image Include="res\about.ico">
       <Filter>资源文件</Filter>
     </Image>
   </ItemGroup>

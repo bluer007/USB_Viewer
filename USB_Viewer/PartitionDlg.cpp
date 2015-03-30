@@ -108,9 +108,11 @@ BOOL CPartitionDlg::OnInitDialog()
 
 		this->p_unit[i]->AddString(TEXT("GB"));
 		this->p_unit[i]->AddString(TEXT("MB"));
+		
+		this->p_unit[i]->SetCurSel(0);		//默认选择GB为单位
 	}
-	this->p_file_system[0]->SetCurSel(0);
-	this->p_unit[0]->SetCurSel(0);
+	this->p_file_system[0]->SetCurSel(0);	//默认选中NTFS文件系统
+	
 
 	this->m_FormatState = FALSE;	//还没有分区
 
