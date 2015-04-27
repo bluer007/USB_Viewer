@@ -55,4 +55,5 @@ public:
 	afx_msg void OnAbout();
 	afx_msg void OnBnClickedCancel();
 	afx_msg void OnPartition();
+afx_msg void OnDblclkList2(NMHDR *pNMHDR, LRESULT *pResult);
 };
