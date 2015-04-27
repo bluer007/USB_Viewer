@@ -60,7 +60,6 @@ BEGIN_MESSAGE_MAP(CUSB_ViewerDlg, CDialogEx)
 	ON_COMMAND(ID_ABOUT, &CUSB_ViewerDlg::OnAbout)
 	ON_BN_CLICKED(IDCANCEL, &CUSB_ViewerDlg::OnBnClickedCancel)
 	ON_COMMAND(ID_Partition, &CUSB_ViewerDlg::OnPartition)
-ON_NOTIFY(NM_DBLCLK, IDC_LIST2, &CUSB_ViewerDlg::OnDblclkList2)
 END_MESSAGE_MAP()
 // CUSB_ViewerDlg 对话框
 
@@ -1250,6 +1249,34 @@ void CUSB_ViewerDlg::OnClickList2(NMHDR *pNMHDR, LRESULT *pResult)
 	{
 		prepos = (int)pos;
 	}
+
+	//CString str;
+	//str.Format("%d", pos);
+	//MessageBox(str);
+
+/*
+	if (pNMItemActivate->iItem >= 0)
+	{
+		CListCtrl* m_CalList = ((CListCtrl*)GetDlgItem(IDC_LIST2));
+		
+		m_CalList->SetItemState(pNMItemActivate->iItem, LVIS_SELECTED || LVS_SHOWSELALWAYS, LVIS_SELECTED || LVS_SHOWSELALWAYS);	//LVS_SHOWSELALWAYS
+		for (int i = 0; i < m_CalList->GetItemCount(); i++)
+		{
+			if (i == pNMItemActivate->iItem)
+			{
+				m_CalList->SetCheck(pNMItemActivate->iItem, TRUE);
+				m_CalList->SetItemState(pNMItemActivate->iItem, LVIS_SELECTED || LVS_SHOWSELALWAYS, LVIS_SELECTED || LVS_SHOWSELALWAYS);	//LVS_SHOWSELALWAYS
+			}
+			else
+			{
+				m_CalList->SetCheck(i, FALSE);
+				m_CalList->SetItemState(pNMItemActivate->iItem, 0, LVIS_SELECTED || LVS_SHOWSELALWAYS);	//LVS_SHOWSELALWAYS
+			}
+		}
+		
+
+	}*/
+
 	
 }
 
@@ -1276,19 +1303,4 @@ void CUSB_ViewerDlg::OnPartition()
 	dlgPartition.DoModal();
 	this->GetUSB(this, IDC_COMBO1);		// 更新所有U盘设备,并显示到组合框中
 	this->OnCbnSelchangeCombo1();		//更新列表框中 分区表 的显示
-}
-
-
-void CUSB_ViewerDlg::OnDblclkList2(NMHDR *pNMHDR, LRESULT *pResult)
-{
-	LPNMITEMACTIVATE pNMItemActivate = reinterpret_cast<LPNMITEMACTIVATE>(pNMHDR);
-	// TODO:  在此添加控件通知处理程序代码
-	*pResult = 1;
-
-	CListCtrl* m_CalList = ((CListCtrl*)GetDlgItem(IDC_LIST2));
-	POSITION pos = m_CalList->GetFirstSelectedItemPosition();
-	if ((int)pos > 0)
-	{
-		this->OnBnClickedOk();
-	}
 }

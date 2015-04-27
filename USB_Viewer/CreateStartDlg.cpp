@@ -386,7 +386,7 @@ INT CCreateStartDlg::Partition(TCHAR* drive, INT num, Partition_Table* list, INT
 				if (dwBytes == dwSize)
 				{
 					//AfxMessageBox(_T(" U盘分区表设置成功!"));
-					if (type && type != MBR)	//即当第一个扇区是pbr扇区时
+					if (PBR_NTFS == type || PBR_FAT32 == type)
 					{
 						//如果mbr扇区就是分区pbr扇区的话, 通过改变分区表来分区的办法就会失败, 所以要变mbr扇区为非pbr扇区
 						if (!this->InstallMBR(&hDrv, NULL, NULL, &diskGeometry))		//安装MBR扇区
@@ -879,6 +879,7 @@ INT CCreateStartDlg::GetOnePartitionInfo(
 		if (!this->GetPartitionBootSector(sector, hDevice, partitionNum, diskGeometry))
 			goto FINAL;
 	}
+
 	
 	enum TYPE
 	{
@@ -1414,10 +1415,10 @@ INT CCreateStartDlg::DeletePartitionBootSector(HANDLE *hDevice, INT num, UCHAR s
 		::WriteFile(*hDevice, newBootSector, diskGeometry->BytesPerSector, &dwbytes, NULL);
 		if (diskGeometry->BytesPerSector != dwbytes)
 		{
-			//DWORD err = GetLastError();
-			//CString str;
-			//str.Format("DeletePartitionBootSector()中错误,错误代码%d", err);
-			//AfxMessageBox(str);
+			DWORD err = GetLastError();
+			CString str;
+			str.Format("DeletePartitionBootSector()中错误,错误代码%d", err);
+			AfxMessageBox(str);
 			goto ERROR1;
 		}
 	}
@@ -1614,8 +1615,6 @@ afx_msg LRESULT CCreateStartDlg::OnGetResult(WPARAM wParam, LPARAM lParam)
 		}
 		else if(FORMAT_ERROR == wParam)
 		{
-			this->SetMyTimer(GetSafeHwnd(), TIMER_Start, TIMER_Start_time, TRUE);
-			((CButton*)(this->GetDlgItem(IDOK)))->SetWindowText(TEXT("开始制作!"));
 			this->m_FormatState = FALSE;
 			if (this->m_needUnzip)		//分区失败,  如果需要解压, 证明是制作启动盘, 所以停止写入镜像
 				this->m_needUnzip = FALSE;
@@ -1637,7 +1636,6 @@ afx_msg LRESULT CCreateStartDlg::OnGetResult(WPARAM wParam, LPARAM lParam)
 		{
 			this->m_needUnzip = FALSE;
 			this->m_FormatState = FALSE;
-			this->SetMyTimer(GetSafeHwnd(), TIMER_Start, TIMER_Start_time, TRUE);
 			((CButton*)(this->GetDlgItem(IDOK)))->SetWindowText(TEXT("开始制作!"));
 			AfxMessageBox("镜像写入失败");
 		}
@@ -2417,11 +2415,9 @@ INT CCreateStartDlg::CheckMbrPbr(
 {
 	INT res = FALSE;
 	HANDLE m_hDevice = INVALID_HANDLE_VALUE;
-	DISK_GEOMETRY diskGeometry = {0};
+	DISK_GEOMETRY diskGeometry;
 	UCHAR* m_sector = NULL;
 	Partition_Table temp_list = { 0 };
-
-
 	if (sector_size > 0 && sector)
 	{
 		m_sector = sector;
@@ -2435,6 +2431,7 @@ INT CCreateStartDlg::CheckMbrPbr(
 			if (!this->GetDiskHandle(drive, disk, &m_hDevice))
 				goto FINAL;
 		}
+
 		if (!this->GetDiskGeometry(&m_hDevice, NULL, NULL, &diskGeometry))
 			goto FINAL;
 		m_sector = new UCHAR[diskGeometry.BytesPerSector]();
@@ -2472,8 +2469,6 @@ INT CCreateStartDlg::CheckMbrPbr(
 		goto FINAL;
 	}
 	
-	if (0 >= diskGeometry.BytesPerSector)
-		diskGeometry.BytesPerSector = sector_size;
 	//以下是 只有pbr扇区情况
 	if (!this->GetOnePartitionInfo(&temp_list, NULL, NULL, &diskGeometry, m_sector, sector_size))
 	{
@@ -2725,5 +2720,3 @@ ERROR1:
 	AfxMessageBox(TEXT("模拟器好像遇到点问题哦 T_T\n\n不好意思啊, 我要回去修理了"));
 	return FALSE;
 }
-
-
