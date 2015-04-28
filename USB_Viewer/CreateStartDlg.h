@@ -25,7 +25,7 @@ public:
 	INT GetPartitionBootSector(UCHAR sector[], HANDLE *hDevice, INT partitionNum, DISK_GEOMETRY* diskGeometry);
 	INT GetOnePartitionInfo(Partition_Table *list, HANDLE *hDevice, INT partitionNum, DISK_GEOMETRY* diskGeometry, UCHAR bootSector[] = NULL, INT sector_size = 0);
 	INT GetActivePartitionNum(HANDLE *hDevice, LPCSTR drive, LPCSTR disk);
-	INT SetActivePartitionNum(INT activePartitionNum, HANDLE *hDevice, LPCSTR drive, LPCSTR disk);
+	INT SetActiveAndHide(INT PartitionNum, INT active, INT hide,HANDLE *hDevice, LPCSTR drive, LPCSTR disk);
 	LARGE_INTEGER GetUSBAllSize(LPCSTR drive);
 	INT CheckMbrPbr(UCHAR sector[], INT sector_size, Partition_Table* list = NULL, HANDLE *hDevice = NULL, LPCSTR drive = NULL, LPCSTR disk = NULL);
 	INT __stdcall FormatPartition();

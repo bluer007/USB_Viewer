@@ -60,6 +60,11 @@ BEGIN_MESSAGE_MAP(CUSB_ViewerDlg, CDialogEx)
 	ON_COMMAND(ID_ABOUT, &CUSB_ViewerDlg::OnAbout)
 	ON_BN_CLICKED(IDCANCEL, &CUSB_ViewerDlg::OnBnClickedCancel)
 	ON_COMMAND(ID_Partition, &CUSB_ViewerDlg::OnPartition)
+ON_BN_CLICKED(SET_ACTIVE, &CUSB_ViewerDlg::OnBnClickedActive)
+ON_BN_CLICKED(SET_NO_ACTIVE, &CUSB_ViewerDlg::OnBnClickedNoActive)
+ON_BN_CLICKED(SET_HIDE, &CUSB_ViewerDlg::OnBnClickedHide)
+ON_BN_CLICKED(SET_NO_HIDE, &CUSB_ViewerDlg::OnBnClickedNoHide)
+ON_NOTIFY(NM_DBLCLK, IDC_LIST2, &CUSB_ViewerDlg::OnDblclkList2)
 END_MESSAGE_MAP()
 // CUSB_ViewerDlg 对话框
 
@@ -608,6 +613,7 @@ void CUSB_ViewerDlg::OnCbnSelchangeCombo1()
 
 	int nIndex;
 	CHAR strSize[20] = { 0 };
+	CHAR strtype[30] = {0};
 	for (int i = 0; i < num; i++)
 	{
 		if (list[i].size < 1000)
@@ -618,7 +624,8 @@ void CUSB_ViewerDlg::OnCbnSelchangeCombo1()
 		if (nIndex < 0)
 			goto FINAL;
 
-		m_ListCtrl->SetItemText(nIndex, 1, _T(list[i].type));
+		sprintf_s(strtype, sizeof(strtype), "%s   %s  %s", TEXT(list[i].type), list[i].active==ACTIVE?TEXT("(活动)"):TEXT("         "), list[i].hide==HIDE ? TEXT("(隐藏)") : TEXT(""));
+		m_ListCtrl->SetItemText(nIndex, 1, strtype);
 	}
 
 	CloseHandle(hDrv);
@@ -1212,6 +1219,10 @@ INT CUSB_ViewerDlg::GetUSBInfo(
 
 			//经过多重检测, 则表示有效, 故赋值
 			memcpy_s(&(*list)[num], sizeof((*list)[num]), &m_list, sizeof(m_list));
+			//判断并设置 活动分区标志位
+			(*list)[num].active = (m_sector[m_sectorSize - 66 + i * 16] == 0x80 ? ACTIVE : NO_ACTIVE);
+			//判断并设置 隐藏分区标志位
+			(*list)[num].hide = ((m_sector[m_sectorSize - 66 + 4 + i * 16] & 0xF0) == 0x00 ? NO_HIDE : HIDE);
 			num++;
 		}
 		res = num;
@@ -1303,4 +1314,181 @@ void CUSB_ViewerDlg::OnPartition()
 	dlgPartition.DoModal();
 	this->GetUSB(this, IDC_COMBO1);		// 更新所有U盘设备,并显示到组合框中
 	this->OnCbnSelchangeCombo1();		//更新列表框中 分区表 的显示
+}
+
+
+void CUSB_ViewerDlg::OnBnClickedActive()
+{
+	CString str;
+	CListCtrl *m_ListCtrl = ((CListCtrl*)GetDlgItem(IDC_LIST2));
+	CComboBox *m_CComboBox = ((CComboBox*)GetDlgItem(IDC_COMBO1));
+
+	m_CComboBox->GetWindowText(str);
+	INT pos = str.Find(":\\");	//因为U盘的显示格式是"G:\ 16G"
+	if (pos == -1)return;		//针对	无用的空白选项
+	str = str.Mid(pos - 1, 2);		//现在str表示"G:"
+
+	//获取要切换显示的分区序号, ps: m_ListCtrl->GetFirstSelectedItemPosition();  若选中则返回 >0, 否则 0
+	INT num = (INT)m_ListCtrl->GetFirstSelectedItemPosition();
+	if (0 == num)
+	{
+		AfxMessageBox(TEXT("亲, 请选择U盘分区哈^_^"));
+		return;
+	}
+
+	CCreateStartDlg m_CreateStartDlg;
+	INT res = 0;
+	if (1 == num)
+		res = m_CreateStartDlg.SetActiveAndHide(5, ACTIVE, KEEP_HIDE_STATUS, NULL, str.GetBuffer(), NULL);
+	else
+		res = m_CreateStartDlg.SetActiveAndHide(num, ACTIVE, KEEP_HIDE_STATUS, NULL, str.GetBuffer(), NULL);
+
+	if (res == TRUE)
+	{
+		m_ListCtrl->DeleteAllItems();	//清楚所有列表项
+		AfxMessageBox(TEXT("成功激活该分区"));
+	}
+	else
+	{
+		AfxMessageBox(TEXT("出大事了, 操作失败啊~啊~啊~~ T_T"));
+	}
+	
+	this->GetUSB(this, IDC_COMBO1);		// 获取当前所有U盘设备,并显示到组合框中
+	this->OnCbnSelchangeCombo1();		//每当选择的U盘改变时候, 自动更新 U盘的 分区列表显示
+
+}
+
+
+void CUSB_ViewerDlg::OnBnClickedNoActive()
+{
+	CString str;
+	CListCtrl *m_ListCtrl = ((CListCtrl*)GetDlgItem(IDC_LIST2));
+	CComboBox *m_CComboBox = ((CComboBox*)GetDlgItem(IDC_COMBO1));
+
+	m_CComboBox->GetWindowText(str);
+	INT pos = str.Find(":\\");	//因为U盘的显示格式是"G:\ 16G"
+	if (pos == -1)return;		//针对	无用的空白选项
+	str = str.Mid(pos - 1, 2);		//现在str表示"G:"
+
+									//获取要切换显示的分区序号, ps: m_ListCtrl->GetFirstSelectedItemPosition();  若选中则返回 >0, 否则 0
+	INT num = (INT)m_ListCtrl->GetFirstSelectedItemPosition();
+	if (0 == num)
+	{
+		AfxMessageBox(TEXT("亲, 请选择U盘分区哈^_^"));
+		return;
+	}
+
+	CCreateStartDlg m_CreateStartDlg;
+	INT res = 0;
+	if (1 == num)
+		res = m_CreateStartDlg.SetActiveAndHide(5, NO_ACTIVE, KEEP_HIDE_STATUS, NULL, str.GetBuffer(), NULL);
+	else
+		res = m_CreateStartDlg.SetActiveAndHide(num, NO_ACTIVE, KEEP_HIDE_STATUS, NULL, str.GetBuffer(), NULL);
+
+	if (res == TRUE)
+	{
+		m_ListCtrl->DeleteAllItems();	//清楚所有列表项
+		AfxMessageBox(TEXT("操作成功"));
+	}
+	else
+	{
+		AfxMessageBox(TEXT("出大事了, 操作失败啊~啊~啊~~ T_T"));
+	}
+
+	this->GetUSB(this, IDC_COMBO1);		// 获取当前所有U盘设备,并显示到组合框中
+	this->OnCbnSelchangeCombo1();		//每当选择的U盘改变时候, 自动更新 U盘的 分区列表显示
+}
+
+
+void CUSB_ViewerDlg::OnBnClickedHide()
+{
+	CString str;
+	CListCtrl *m_ListCtrl = ((CListCtrl*)GetDlgItem(IDC_LIST2));
+	CComboBox *m_CComboBox = ((CComboBox*)GetDlgItem(IDC_COMBO1));
+
+	m_CComboBox->GetWindowText(str);
+	INT pos = str.Find(":\\");	//因为U盘的显示格式是"G:\ 16G"
+	if (pos == -1)return;		//针对	无用的空白选项
+	str = str.Mid(pos - 1, 2);		//现在str表示"G:"
+
+									//获取要切换显示的分区序号, ps: m_ListCtrl->GetFirstSelectedItemPosition();  若选中则返回 >0, 否则 0
+	INT num = (INT)m_ListCtrl->GetFirstSelectedItemPosition();
+	if (0 == num)
+	{
+		AfxMessageBox(TEXT("亲, 请选择U盘分区哈^_^"));
+		return;
+	}
+
+	CCreateStartDlg m_CreateStartDlg;
+	INT res = 0;
+	if (1 == num)
+		res = m_CreateStartDlg.SetActiveAndHide(5, KEEP_ACTIVE_STATUS, HIDE, NULL, str.GetBuffer(), NULL);
+	else
+		res = m_CreateStartDlg.SetActiveAndHide(num, KEEP_ACTIVE_STATUS, HIDE, NULL, str.GetBuffer(), NULL);
+
+	if (res == TRUE)
+	{
+		m_ListCtrl->DeleteAllItems();	//清楚所有列表项
+		AfxMessageBox(TEXT("成功隐藏该分区"));
+	}
+	else
+	{
+		AfxMessageBox(TEXT("出大事了, 操作失败啊~啊~啊~~ T_T"));
+	}
+
+	this->GetUSB(this, IDC_COMBO1);		// 获取当前所有U盘设备,并显示到组合框中
+	this->OnCbnSelchangeCombo1();		//每当选择的U盘改变时候, 自动更新 U盘的 分区列表显示
+}
+
+
+void CUSB_ViewerDlg::OnBnClickedNoHide()
+{
+	CString str;
+	CListCtrl *m_ListCtrl = ((CListCtrl*)GetDlgItem(IDC_LIST2));
+	CComboBox *m_CComboBox = ((CComboBox*)GetDlgItem(IDC_COMBO1));
+
+	m_CComboBox->GetWindowText(str);
+	INT pos = str.Find(":\\");	//因为U盘的显示格式是"G:\ 16G"
+	if (pos == -1)return;		//针对	无用的空白选项
+	str = str.Mid(pos - 1, 2);		//现在str表示"G:"
+
+									//获取要切换显示的分区序号, ps: m_ListCtrl->GetFirstSelectedItemPosition();  若选中则返回 >0, 否则 0
+	INT num = (INT)m_ListCtrl->GetFirstSelectedItemPosition();
+	if (0 == num)
+	{
+		AfxMessageBox(TEXT("亲, 请选择U盘分区哈^_^"));
+		return;
+	}
+
+	CCreateStartDlg m_CreateStartDlg;
+	INT res = 0;
+	if (1 == num)
+		res = m_CreateStartDlg.SetActiveAndHide(5, KEEP_ACTIVE_STATUS, NO_HIDE, NULL, str.GetBuffer(), NULL);
+	else
+		res = m_CreateStartDlg.SetActiveAndHide(num, KEEP_ACTIVE_STATUS, NO_HIDE, NULL, str.GetBuffer(), NULL);
+
+	if (res == TRUE)
+	{
+		m_ListCtrl->DeleteAllItems();	//清楚所有列表项
+		AfxMessageBox(TEXT("操作成功"));
+	}
+	else
+	{
+		AfxMessageBox(TEXT("出大事了, 操作失败啊~啊~啊~~ T_T"));
+	}
+
+	this->GetUSB(this, IDC_COMBO1);		// 获取当前所有U盘设备,并显示到组合框中
+	this->OnCbnSelchangeCombo1();		//每当选择的U盘改变时候, 自动更新 U盘的 分区列表显示
+}
+
+
+
+
+void CUSB_ViewerDlg::OnDblclkList2(NMHDR *pNMHDR, LRESULT *pResult)
+{
+	LPNMITEMACTIVATE pNMItemActivate = reinterpret_cast<LPNMITEMACTIVATE>(pNMHDR);
+	// TODO:  在此添加控件通知处理程序代码
+	*pResult = 1;
+
+	this->OnBnClickedOk();
 }

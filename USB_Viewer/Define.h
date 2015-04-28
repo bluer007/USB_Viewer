@@ -18,6 +18,13 @@ enum
 	PBR_EXFAT,
 
 	NO_Active_Partition,		//用于CCreateStartDlg::GetActivePartitionNum()函数, 表示找不到活动分区
+
+	ACTIVE,						//活动分区标志位
+	NO_ACTIVE,
+	KEEP_ACTIVE_STATUS,
+	HIDE,						//隐藏分区标志位
+	NO_HIDE,	
+	KEEP_HIDE_STATUS,
 };
 
 const DWORD FAT32_SIZE_LIMIT = 35;		//format命令要求fat32 > 35MB
@@ -27,6 +34,8 @@ struct Partition_Table
 {
 	CHAR type[8];						//只有"ntfs"和"fat32"有效
 	unsigned long long size;			//以MB为单位		(ULONG64)
+	INT active;							//是否为活动分区
+	INT hide;							//是否为隐藏分区
 };
 
 struct FormatPartitionArg

@@ -147,8 +147,8 @@ void CCreateStartDlg::OnBnClickedOk()
 			ntfsSize.QuadPart = usbSize.QuadPart - fat32size.QuadPart;		//剩下的U盘容量分配给ntfs分区
 			Partition_Table table[] =
 			{
-				{ "ntfs", (ULONG64)ntfsSize.QuadPart },//{"ntfs", 1024 },		//1024MB == 2097152扇区	2097152
-				{ "fat32", (ULONG64)fat32size.QuadPart },		//2097152mb == 4194304	4194304			ntfs	fat32
+				{ TEXT("ntfs"), (ULONG64)ntfsSize.QuadPart, NO_ACTIVE, NO_HIDE},//{"ntfs", 1024 },		//1024MB == 2097152扇区	2097152
+				{ TEXT("fat32"), (ULONG64)fat32size.QuadPart, ACTIVE, HIDE},		//2097152mb == 4194304	4194304			ntfs	fat32
 																//{"ntfs", 400 },		//1024	2048	3072	4096
 																//{"ntfs", 2048 }
 			};
@@ -249,7 +249,7 @@ void CCreateStartDlg::OnBnClickedOk()
 			this->m_needUnzip = TRUE;
 			this->m_FormatState = FALSE;
 			//设置 分区表第一个有效项 为活动分区
-			INT res_active = this->SetActivePartitionNum(5, &hDevice, NULL, NULL);
+			INT res_active = this->SetActiveAndHide(5, ACTIVE, HIDE, &hDevice, NULL, NULL);
 			if (-1 == res_active)
 			{
 				CloseHandle(hDevice);
@@ -597,6 +597,7 @@ INT __stdcall CCreateStartDlg::FormatPartition()
 	if (this->m_needUnzip)
 	{
 		//如果需要解压, 证明本次分区操作是制作启动盘操作的一部分, 故写入mbr,pbr,镜像文件
+		this->SetActiveAndHide(2,ACTIVE,HIDE, &m_hDrv,NULL, NULL);			//设置分区活动和隐藏属性
 		//AfxMessageBox("即将安装活动分区的mbr和 pbr扇区");
 		if (!this->InstallMBR(&m_hDrv, NULL, NULL, &m_diskGeometry))		//安装MBR扇区
 			goto ERROR2;
@@ -1032,15 +1033,17 @@ FINAL:
 	return res;
 }
 
-INT CCreateStartDlg::SetActivePartitionNum(INT activePartitionNum, HANDLE *hDevice, LPCSTR drive, LPCSTR disk)
+INT CCreateStartDlg::SetActiveAndHide(INT PartitionNum, INT active, INT hide, HANDLE *hDevice, LPCSTR drive, LPCSTR disk)
 {
-	//activePartitionNum 表示 设置U盘分区表上第几个项 为活动分区,
-	//如1,2,3,4,   0表示不设活动分区,  5表示将分区表的第一个 有效主分区项 (不一定排第一项)设为活动分区
+	//PartitionNum 表示 设置U盘分区表上第几个分区,
+	//如1,2,3,4   对应分区表上第1,2,3,4个分区, 5表示分区表上第一个有效分区表项(不一定是第一项哦)
+	//active, hide 表示是否设置该分区为活动分区  或者是  隐藏分区
 	//返回值FALSE表出错, -1表要设置的activePartitionNum对应的分区是扩展分区, TRUE表成功设置(就算activePartitionNum == 0)
-	if (activePartitionNum < 0 && activePartitionNum > 5)
+	if (PartitionNum < 0 && PartitionNum > 5)
 		return FALSE;
 
-	INT m_activePartitionNum = activePartitionNum;
+	INT m_activePartitionNum = PartitionNum;
+	BOOL isActive = (active == ACTIVE? TRUE : FALSE);			//指明是否有某个有效分区被设为活动分区		
 	HANDLE m_hDevice = INVALID_HANDLE_VALUE;
 	UCHAR* sector = NULL;
 	INT res = FALSE;
@@ -1066,7 +1069,7 @@ INT CCreateStartDlg::SetActivePartitionNum(INT activePartitionNum, HANDLE *hDevi
 	if (MBR != this->CheckMbrPbr(sector, sector_size, NULL, NULL, NULL, NULL))
 		goto FINAL;
 
-	if (5 == activePartitionNum)
+	if (5 == PartitionNum)
 	{
 		BOOL isFindMain = FALSE;	//是否找到有效主分区
 		BOOL isFindExtend = FALSE;	//是否找到 扩展分区
@@ -1106,7 +1109,7 @@ INT CCreateStartDlg::SetActivePartitionNum(INT activePartitionNum, HANDLE *hDevi
 		}
 		//剩下的就是找到主分区了
 	}
-
+	
 	for (INT i = 1; i <= 4; i++)
 	{
 		if (m_activePartitionNum == i)
@@ -1115,8 +1118,20 @@ INT CCreateStartDlg::SetActivePartitionNum(INT activePartitionNum, HANDLE *hDevi
 			if (sector[sector_size - 66 + 4 + (i - 1) * 16] != 0x0F
 				&& sector[sector_size - 66 + 4 + (i - 1) * 16] != 0x05)
 			{
-				sector[sector_size - 66 + (i - 1) * 16] = 0x80;
+				if(active == ACTIVE || active == NO_ACTIVE)
+					sector[sector_size - 66 + (i - 1) * 16] = (active==ACTIVE? 0x80:0x00);
 				//让循环继续执行, 使 非活动分区 设为0x00
+				//设置隐藏分区标志, 不是HIDE 和 NO_HIDE  就按照原来的标志状态
+				if (HIDE == hide)
+				{
+					sector[sector_size - 66 + 4 + (i - 1) * 16] = 
+						sector[sector_size - 66 + 4 + (i - 1) * 16] & 0x0F | 0x10;
+				}
+				else if(NO_HIDE == hide)
+				{
+					sector[sector_size - 66 + 4 + (i - 1) * 16] =
+						sector[sector_size - 66 + 4 + (i - 1) * 16] & 0x0F;
+				}
 			}
 			else
 			{
@@ -1125,7 +1140,8 @@ INT CCreateStartDlg::SetActivePartitionNum(INT activePartitionNum, HANDLE *hDevi
 			}
 		}
 		else
-			sector[sector_size - 66 + (i - 1) * 16] = 0x00;
+			if(isActive)	//因为有某个分区被设为活动分区, 所以其他分区就不激活, 否则保持原来状态
+				sector[sector_size - 66 + (i - 1) * 16] = 0x00;
 	}
 
 	//开始写入扇区
@@ -1281,14 +1297,16 @@ INT CCreateStartDlg::CreatePartitionTable(UCHAR sector[], INT sector_size, INT n
 		unsigned char sys_end_pos[3] = { 0 };			//分区结束位置标志
 
 
-		if (activeNum == 0 || activeNum != i + 1)		//activeNum == =0 表没有活动分区
-		{
-			sys_active = 0x00;		//活动分区 标志位
-		}
-		else	//activeNum>0时候,表第activeNum分区为活动分区
-		{
-			sys_active = 0x80;		//活动分区 标志位
-		}
+		//if (activeNum == 0 || activeNum != i + 1)		//activeNum == =0 表没有活动分区
+		//{
+		//	sys_active = 0x00;		//活动分区 标志位
+		//}
+		//else	//activeNum>0时候,表第activeNum分区为活动分区
+		//{
+		//	sys_active = 0x80;		//活动分区 标志位
+		//}
+
+		sys_active = (list[i].active == ACTIVE? 0x80 : 0x00);
 
 		if (0 == i)
 		{
@@ -1316,13 +1334,13 @@ INT CCreateStartDlg::CreatePartitionTable(UCHAR sector[], INT sector_size, INT n
 
 		if (strcmp(list[i].type, _T("ntfs")) == 0
 			|| strcmp(list[i].type, _T("NTFS")) == 0)
-		{
-			sys_filesystem = 0x07;		//文件系统标志位
+		{ 
+			sys_filesystem = (list[i].hide == HIDE? 0x17 : 0x07);		//文件系统标志位
 		}
 		else if (strcmp(list[i].type, _T("fat32")) == 0
 			|| strcmp(list[i].type, _T("FAT32")) == 0)
 		{
-			sys_filesystem = 0x0c;
+			sys_filesystem = (list[i].hide == HIDE? 0x1c : 0x0c);
 		}
 		else
 		{
@@ -1586,11 +1604,10 @@ INT CCreateStartDlg::SetFormatPartitionArg(FormatPartitionArg* arg)
 		for (int i = 0; i < arg->num; i++)
 		{
 			this->m_FormatPartitionArg->list[i].size = arg->list[i].size;
-			char a[8] = {0};
-			strcpy_s(a,
-				sizeof(this->m_FormatPartitionArg->list[i].type), arg->list[i].type);
 			strcpy_s(this->m_FormatPartitionArg->list[i].type, 
 				sizeof(this->m_FormatPartitionArg->list[i].type), arg->list[i].type);
+			this->m_FormatPartitionArg->list[i].active = arg->list[i].active;
+			this->m_FormatPartitionArg->list[i].hide = arg->list[i].hide;
 		}
 
 		this->m_FormatPartitionArg->msgWnd = arg->msgWnd;
