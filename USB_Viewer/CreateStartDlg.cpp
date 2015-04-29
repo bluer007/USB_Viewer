@@ -881,7 +881,6 @@ INT CCreateStartDlg::GetOnePartitionInfo(
 			goto FINAL;
 	}
 
-	
 	enum TYPE
 	{
 		NTFS,

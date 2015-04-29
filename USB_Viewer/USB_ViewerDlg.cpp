@@ -60,11 +60,11 @@ BEGIN_MESSAGE_MAP(CUSB_ViewerDlg, CDialogEx)
 	ON_COMMAND(ID_ABOUT, &CUSB_ViewerDlg::OnAbout)
 	ON_BN_CLICKED(IDCANCEL, &CUSB_ViewerDlg::OnBnClickedCancel)
 	ON_COMMAND(ID_Partition, &CUSB_ViewerDlg::OnPartition)
-ON_BN_CLICKED(SET_ACTIVE, &CUSB_ViewerDlg::OnBnClickedActive)
-ON_BN_CLICKED(SET_NO_ACTIVE, &CUSB_ViewerDlg::OnBnClickedNoActive)
-ON_BN_CLICKED(SET_HIDE, &CUSB_ViewerDlg::OnBnClickedHide)
-ON_BN_CLICKED(SET_NO_HIDE, &CUSB_ViewerDlg::OnBnClickedNoHide)
-ON_NOTIFY(NM_DBLCLK, IDC_LIST2, &CUSB_ViewerDlg::OnDblclkList2)
+	ON_BN_CLICKED(SET_ACTIVE, &CUSB_ViewerDlg::OnBnClickedActive)
+	ON_BN_CLICKED(SET_NO_ACTIVE, &CUSB_ViewerDlg::OnBnClickedNoActive)
+	ON_BN_CLICKED(SET_HIDE, &CUSB_ViewerDlg::OnBnClickedHide)
+	ON_BN_CLICKED(SET_NO_HIDE, &CUSB_ViewerDlg::OnBnClickedNoHide)
+	ON_NOTIFY(NM_DBLCLK, IDC_LIST2, &CUSB_ViewerDlg::OnDblclkList2)
 END_MESSAGE_MAP()
 // CUSB_ViewerDlg 对话框
 
@@ -1480,8 +1480,6 @@ void CUSB_ViewerDlg::OnBnClickedNoHide()
 	this->GetUSB(this, IDC_COMBO1);		// 获取当前所有U盘设备,并显示到组合框中
 	this->OnCbnSelchangeCombo1();		//每当选择的U盘改变时候, 自动更新 U盘的 分区列表显示
 }
-
-
 
 
 void CUSB_ViewerDlg::OnDblclkList2(NMHDR *pNMHDR, LRESULT *pResult)
