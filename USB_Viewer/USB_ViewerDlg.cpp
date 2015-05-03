@@ -612,8 +612,8 @@ void CUSB_ViewerDlg::OnCbnSelchangeCombo1()
 		goto FINAL;
 
 	int nIndex;
-	CHAR strSize[20] = { 0 };
-	CHAR strtype[30] = {0};
+	CHAR strSize[50] = { 0 };
+	CHAR strtype[50] = {0};
 	for (int i = 0; i < num; i++)
 	{
 		if (list[i].size < 1000)
@@ -1145,6 +1145,7 @@ _tprintf(_T("/n"));*/
 void CUSB_ViewerDlg::OnCeatestart()
 {
 	// TODO:  在此添加命令处理程序代码
+	MessageBox(TEXT("在使用本功能之前, \n\n请关掉 360, 金山卫士, 腾讯管家等杀毒软件!!!\n\n否则可能出现误报木马病毒的情况, 请信任允许!!!"), TEXT("提醒"));
 	CCreateStartDlg dlg;
 	INT_PTR nResponse = dlg.DoModal();
 	this->GetUSB(this, IDC_COMBO1);		// 更新所有U盘设备,并显示到组合框中
