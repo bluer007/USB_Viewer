@@ -337,7 +337,7 @@ void CPartitionDlg::OnBnClickedOk()
 		temp.AppendFormat(TEXT("活动分区:  无 \n\n"));
 	}
 
-	temp.Append(TEXT("\n分区将清除U盘所有数据, 请做好 备份 后再确认!\n"));
+	temp.Append(TEXT("分区操作会 【清除U盘所有数据】 ,包括山寨老毛桃PE\n务必备份好U盘资料\n\n是否确定?"));
 	//弹出确认框 供 用户最后确认
 	if (IDYES == AfxMessageBox(temp, MB_YESNO))
 	{

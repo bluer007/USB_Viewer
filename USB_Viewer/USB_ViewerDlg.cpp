@@ -553,7 +553,7 @@ INT CUSB_ViewerDlg::GetUSB(CDialogEx* dialog, INT ID)
 				(PULARGE_INTEGER)&i64FreeBytesToCaller,
 				(PULARGE_INTEGER)&i64TotalBytes,
 				(PULARGE_INTEGER)&i64FreeBytes);*/
-
+			
 			if (usb_allSize.QuadPart / (1024.0 * 1024.0) <= 1000)
 			{
 				//容量少于1000M 就用mb做显示单位
@@ -1145,7 +1145,7 @@ _tprintf(_T("/n"));*/
 void CUSB_ViewerDlg::OnCeatestart()
 {
 	// TODO:  在此添加命令处理程序代码
-	MessageBox(TEXT("在使用本功能之前, \n\n请关掉 360, 金山卫士, 腾讯管家等杀毒软件!!!\n\n否则可能出现误报木马病毒的情况, 请信任允许!!!"), TEXT("提醒"));
+	//MessageBox(TEXT("在使用本功能之前, \n\n请关掉 360, 金山卫士, 腾讯管家等杀毒软件!!!\n\n否则可能出现误报木马病毒的情况, 请信任允许!!!"), TEXT("提醒"));
 	CCreateStartDlg dlg;
 	INT_PTR nResponse = dlg.DoModal();
 	this->GetUSB(this, IDC_COMBO1);		// 更新所有U盘设备,并显示到组合框中
@@ -1336,8 +1336,14 @@ void CUSB_ViewerDlg::OnBnClickedActive()
 		AfxMessageBox(TEXT("亲, 请选择U盘分区哈^_^"));
 		return;
 	}
-
+	
 	CCreateStartDlg m_CreateStartDlg;
+	INT sector_type = m_CreateStartDlg.CheckMbrPbr(NULL, NULL, NULL, NULL, str.GetBuffer(), NULL);
+	if (NO_MBR_PBR != sector_type && MBR != sector_type)		//即第一扇区是pbr, 不符合条件
+	{
+		AfxMessageBox(TEXT("U盘不符合设置条件哦\n\n建议重新格式化(自定义U盘分区)"));
+		return;
+	}
 	INT res = 0;
 	if (1 == num)
 		res = m_CreateStartDlg.SetActiveAndHide(5, ACTIVE, KEEP_HIDE_STATUS, NULL, str.GetBuffer(), NULL);
@@ -1380,6 +1386,12 @@ void CUSB_ViewerDlg::OnBnClickedNoActive()
 	}
 
 	CCreateStartDlg m_CreateStartDlg;
+	INT sector_type = m_CreateStartDlg.CheckMbrPbr(NULL, NULL, NULL, NULL, str.GetBuffer(), NULL);
+	if (NO_MBR_PBR != sector_type && MBR != sector_type)		//即第一扇区是pbr, 不符合条件
+	{
+		AfxMessageBox(TEXT("U盘不符合设置条件哦\n\n建议重新格式化(自定义U盘分区)"));
+		return;
+	}
 	INT res = 0;
 	if (1 == num)
 		res = m_CreateStartDlg.SetActiveAndHide(5, NO_ACTIVE, KEEP_HIDE_STATUS, NULL, str.GetBuffer(), NULL);
@@ -1421,6 +1433,12 @@ void CUSB_ViewerDlg::OnBnClickedHide()
 	}
 
 	CCreateStartDlg m_CreateStartDlg;
+	INT sector_type = m_CreateStartDlg.CheckMbrPbr(NULL, NULL, NULL, NULL, str.GetBuffer(), NULL);
+	if (NO_MBR_PBR != sector_type && MBR != sector_type)		//即第一扇区是pbr, 不符合条件
+	{
+		AfxMessageBox(TEXT("U盘不符合设置条件哦\n\n建议重新格式化(自定义U盘分区)"));
+		return;
+	}
 	INT res = 0;
 	if (1 == num)
 		res = m_CreateStartDlg.SetActiveAndHide(5, KEEP_ACTIVE_STATUS, HIDE, NULL, str.GetBuffer(), NULL);
@@ -1462,6 +1480,12 @@ void CUSB_ViewerDlg::OnBnClickedNoHide()
 	}
 
 	CCreateStartDlg m_CreateStartDlg;
+	INT sector_type = m_CreateStartDlg.CheckMbrPbr(NULL, NULL, NULL, NULL, str.GetBuffer(), NULL);
+	if (NO_MBR_PBR != sector_type && MBR != sector_type)		//即第一扇区是pbr, 不符合条件
+	{
+		AfxMessageBox(TEXT("U盘不符合设置条件哦\n\n建议重新格式化(自定义U盘分区)"));
+		return;
+	}
 	INT res = 0;
 	if (1 == num)
 		res = m_CreateStartDlg.SetActiveAndHide(5, KEEP_ACTIVE_STATUS, NO_HIDE, NULL, str.GetBuffer(), NULL);

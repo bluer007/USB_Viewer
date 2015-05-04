@@ -108,7 +108,7 @@ void CCreateStartDlg::OnBnClickedOk()
 	if (INVALID_HANDLE_VALUE == hfile)
 	{
 		CloseHandle(hfile);
-		AfxMessageBox(TEXT("找不到镜像文件, 不能写入 T_T"));
+		AfxMessageBox(TEXT("找不到镜像文件, 不能写入\n\n请将 计算机协会PE.iso镜像文件 放到与本工具同一目录中"));
 		return;
 	}
 	LARGE_INTEGER fileSize = {0};
@@ -131,7 +131,11 @@ void CCreateStartDlg::OnBnClickedOk()
 			if (fileSize.QuadPart >= usbSize.QuadPart)
 			{
 				CloseHandle(hfile);
-				AfxMessageBox(TEXT("U盘容量不足, 不够写入镜像文件咧"));
+				AfxMessageBox(TEXT("U盘总容量不足, 不够写入镜像文件咧"));
+				return;
+			}
+			if (IDNO == AfxMessageBox(TEXT("即将 清除U盘所有数据, 包括山寨老毛桃PE\n务必备份好U盘资料\n\n是否确定?"), MB_YESNO))
+			{
 				return;
 			}
 
@@ -149,8 +153,8 @@ void CCreateStartDlg::OnBnClickedOk()
 			{
 				{ TEXT("ntfs"), (ULONG64)ntfsSize.QuadPart, NO_ACTIVE, NO_HIDE},//{"ntfs", 1024 },		//1024MB == 2097152扇区	2097152
 				{ TEXT("fat32"), (ULONG64)fat32size.QuadPart, ACTIVE, HIDE},		//2097152mb == 4194304	4194304			ntfs	fat32
-																//{"ntfs", 400 },		//1024	2048	3072	4096
-																//{"ntfs", 2048 }
+				//{"ntfs", 400 },		//1024	2048	3072	4096
+				//{"ntfs", 2048 }
 			};
 			this->m_FormatState = TRUE;
 			this->m_needUnzip = TRUE;
@@ -241,7 +245,10 @@ void CCreateStartDlg::OnBnClickedOk()
 			{
 				CloseHandle(hDevice);
 				CloseHandle(hfile);
-				AfxMessageBox(TEXT("呵呵, 你的U盘的 可用空间 不足哦~~\n建议, 选择格式化制作U盘, 或者请先清出足够空间再继续^_^"));
+				CString tmp;
+				tmp.Format(TEXT("呵呵, 你的U盘的 空闲空间 不足哦~~\n建议手动清出 %ldMB 空闲空间再继续^\n或者, 选择格式化制作启动盘呗 ^_^"),
+					unsigned long long(fileSize.QuadPart + (LONGLONG)10485760.0) / unsigned long long(1024.0*1024.0));
+				AfxMessageBox(tmp.GetBuffer());
 				return;
 			}
 
@@ -862,7 +869,8 @@ INT CCreateStartDlg::GetOnePartitionInfo(
 	//partitionNum为 分区表第几项 , 即第几个分区(无论是否有效), 如1, 2,3 4
 	//若bootSector有效,则只能是文件系统的引导扇区,本函数将分析该扇区
 	//且hDevice优先级比bootSector高
-
+	//当hDevice为NULL, bootSector有效时, diskGeometry->BytesPerSector和sector_size必须已设置好
+	
 	INT res = FALSE;
 	UCHAR* sector = NULL;
 	if (!list || !hDevice || partitionNum > 4 || partitionNum <= 0 || !diskGeometry)
@@ -934,7 +942,7 @@ INT CCreateStartDlg::GetOnePartitionInfo(
 			partitionSize++;		//因为ntfs的 分区总共扇区 是算少了第一个引导扇区的 , 而fat32中是没有算少的
 
 		strcpy_s(list->type, sizeof(list->type), TEXT("NTFS"));
-		list->size = ULONG64((ULONG64)partitionSize * (ULONG64)diskGeometry->BytesPerSector / (1024.0 * 1024.0));
+		list->size = ULONG64((ULONG64)partitionSize * (ULONG64)diskGeometry->BytesPerSector / ULONG64(1024.0 * 1024.0));
 	}
 	else if (FAT32 == type)
 	{
@@ -943,16 +951,20 @@ INT CCreateStartDlg::GetOnePartitionInfo(
 			goto FINAL;
 
 		strcpy_s(list->type, sizeof(list->type), TEXT("FAT32"));
-		list->size = ULONG64((ULONG64)partitionSize * (ULONG64)diskGeometry->BytesPerSector / (1024.0 * 1024.0));
+		list->size = ULONG64((ULONG64)partitionSize * (ULONG64)diskGeometry->BytesPerSector / ULONG64(1024.0 * 1024.0));
 	}
 	else if (FAT16 == type)
 	{
-		memcpy_s(&partitionSize, sizeof(DWORD), &sector[32], 4);		//fat16(fat)引导扇区中 分区总共扇区 标志位
+		memcpy_s(&partitionSize, sizeof(DWORD), &sector[32], 4);		//fat16(fat)引导扇区中 分区总共扇区(大于32MB) 标志位
 		if (partitionSize <= 0)
-			goto FINAL;
+		{
+			memcpy_s(&partitionSize, sizeof(DWORD), &sector[19], 2);	//fat16(fat)引导扇区中 分区总共扇区(小于等于32MB) 标志位
+			if (partitionSize <= 0)
+				goto FINAL;
+		}
 
 		strcpy_s(list->type, sizeof(list->type), TEXT("FAT"));
-		list->size = ULONG64((ULONG64)partitionSize * (ULONG64)diskGeometry->BytesPerSector / (1024.0 * 1024.0));
+		list->size = ULONG64((ULONG64)partitionSize * (ULONG64)diskGeometry->BytesPerSector / ULONG64(1024.0 * 1024.0));
 	}
 	else if (exFAT == type)
 	{
@@ -966,7 +978,7 @@ INT CCreateStartDlg::GetOnePartitionInfo(
 		if (sectorInCluster <= 0|| sectorSize <= 0|| partitionSize <= 0)
 			goto FINAL;
 		strcpy_s(list->type, sizeof(list->type), TEXT("exFAT"));
-		list->size = ULONG64((ULONG64)partitionSize * (ULONG64)(pow(2, (sectorSize + sectorInCluster))) / (1024.0 * 1024.0));
+		list->size = ULONG64((ULONG64)partitionSize * (ULONG64)(pow(2, (sectorSize + sectorInCluster))) / ULONG64(1024.0 * 1024.0));
 	}
 	else	
 		goto FINAL;		//type == UNKNOW
@@ -2431,12 +2443,13 @@ INT CCreateStartDlg::CheckMbrPbr(
 {
 	INT res = FALSE;
 	HANDLE m_hDevice = INVALID_HANDLE_VALUE;
-	DISK_GEOMETRY diskGeometry;
+	DISK_GEOMETRY diskGeometry = {0};
 	UCHAR* m_sector = NULL;
 	Partition_Table temp_list = { 0 };
 	if (sector_size > 0 && sector)
 	{
 		m_sector = sector;
+		diskGeometry.BytesPerSector = sector_size;
 	}
 	else if(hDevice || drive || disk)
 	{
@@ -2649,6 +2662,7 @@ void CCreateStartDlg::OnBnClickedBoot()
 		return;		//针对  空白的选项
 	}
 
+	AfxMessageBox(TEXT("在使用本功能之前, \n\n请关掉 360, 金山卫士, 腾讯管家等杀毒软件!!!\n否则可能出现误报木马病毒的情况, 请信任允许!!!\n\n并且请关闭各种分区软件, 包括DiskGenius等"));
 	union
 	{
 		INT(__stdcall CCreateStartDlg::*BootPE)();
