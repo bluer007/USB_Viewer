@@ -134,7 +134,9 @@ void CCreateStartDlg::OnBnClickedOk()
 				AfxMessageBox(TEXT("U盘总容量不足, 不够写入镜像文件咧"));
 				return;
 			}
-			if (IDNO == AfxMessageBox(TEXT("即将 清除U盘所有数据, 包括山寨老毛桃PE\n务必备份好U盘资料\n\n是否确定?"), MB_YESNO))
+			CString tep_str;
+			tep_str.Format(TEXT("即将 清除U盘所有数据, 包括山寨老毛桃PE\n务必备份好U盘资料\n\nU盘:   %s盘【%.1fG】\n镜像:  计算机协会PE.iso【%.1fM】\n\n是否确定?"), str.Left(1), (usbSize.QuadPart / (1024.0 *1024.0*1024.0)), (fileSize.QuadPart / (1024.0 *1024.0)));
+			if (IDNO == AfxMessageBox(tep_str, MB_YESNO))
 			{
 				return;
 			}
@@ -252,6 +254,13 @@ void CCreateStartDlg::OnBnClickedOk()
 				return;
 			}
 
+			CString tep_str;
+			tep_str.Format(TEXT("U盘:   %s盘【%.1fG】\n镜像:  计算机协会PE.iso【%.1fM】\n\n保留数据制作启动盘\n是否确定?"), str.Left(1), (usbSize.QuadPart / (1024.0 *1024.0*1024.0)), (fileSize.QuadPart / (1024.0 *1024.0)));
+			if (IDNO == AfxMessageBox(tep_str, MB_YESNO))
+			{
+				return;
+			}
+
 			//开始制作启动盘, 不格式化
 			this->m_needUnzip = TRUE;
 			this->m_FormatState = FALSE;
@@ -274,7 +283,7 @@ void CCreateStartDlg::OnBnClickedOk()
 				return;
 			}
 			
-			//开始写入mbr,pbr,镜像文件
+			//写入mbr,pbr,镜像文件
 			//AfxMessageBox("即将安装活动分区的mbr和 pbr扇区");
 			if (!this->InstallMBR(&hDevice, NULL, NULL, &diskGeometry))		//安装MBR扇区
 			{
@@ -386,7 +395,7 @@ INT CCreateStartDlg::Partition(TCHAR* drive, INT num, Partition_Table* list, INT
 
 				dwBytes = 0;
 				SetFilePointer(hDrv, 0, NULL, FILE_BEGIN);
-				this->LockVolume(NULL, drive);
+				INT A2 = this->LockVolume(NULL, drive);
 				//写入新的分区表
 				WriteFile(hDrv, sector, dwSize, &dwBytes, NULL);
 				this->UnLockVolume();
@@ -400,7 +409,7 @@ INT CCreateStartDlg::Partition(TCHAR* drive, INT num, Partition_Table* list, INT
 							goto ERROR2;
 					}
 					//清零分区表对应分区的引导扇区		初步解决了  RemountDrive()时候, 弹出window的格式化U盘窗口
-					this->LockVolume(NULL, drive);
+					INT A = this->LockVolume(NULL, drive);
 					INT deleteRes = this->DeletePartitionBootSector(&hDrv, num, sector, dwSize, &diskGeometry);	
 					this->UnLockVolume();
 					if (!this->RemountDrive(1, FALSE, drive))
